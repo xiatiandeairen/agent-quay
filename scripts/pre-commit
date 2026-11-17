@@ -1,0 +1,3 @@
+#!/bin/bash
+# 安装：ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
+GUARD_STAGED=1 exec "$(git rev-parse --show-toplevel)/scripts/guard.sh"

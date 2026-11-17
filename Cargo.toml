@@ -1,0 +1,64 @@
+[workspace]
+members = ["crates/aq-core", "crates/aq-store", "crates/aq-sys"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.89"
+version = "0.2.0"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/xiatiandeairen/agent-quay"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+too_many_lines = "deny"
+
+[package]
+name = "aq"
+edition.workspace = true
+version.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "单机多 agent 资源调度器：排队执行重任务、借还设备和账号"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "aq"
+path = "src/main.rs"
+
+[[test]]
+name = "acceptance"
+path = "tests/acceptance/main.rs"
+
+[[test]]
+name = "contracts"
+path = "tests/contracts/main.rs"
+
+[[test]]
+name = "storage"
+path = "tests/storage/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+aq-core = { version = "0.2.0", path = "crates/aq-core" }
+aq-store = { version = "0.2.0", path = "crates/aq-store" }
+aq-sys = { version = "0.2.0", path = "crates/aq-sys" }
+clap = { version = "4.6.7", features = ["derive"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+toml = "1.2.1"
+ulid = "3.0.0"
+
+[dev-dependencies]
+assert_cmd = "2.2.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tempfile = "3.27.0"

@@ -1,0 +1,12 @@
+#!/bin/bash
+# 验收用假 devicectl：只认 `list devices [-q] --json-output <路径>`。状态目录 $FAKE_DEV_DIR：
+# ios.json 存在就原样输出（测试按需写入），否则报告 phone-1 有线可用；fail 存在时注入失败；devicectl.log 记录每次调用。
+D="${FAKE_DEV_DIR:?FAKE_DEV_DIR 未设置}"; mkdir -p "$D"
+echo "$*" >> "$D/devicectl.log"
+[ "$1 $2" = "list devices" ] || { echo "fake-devicectl: unknown $*" >&2; exit 2; }
+out=""; while [ $# -gt 0 ]; do [ "$1" = --json-output ] && out="$2"; shift; done
+[ -n "$out" ] || { echo "fake-devicectl: 缺 --json-output" >&2; exit 2; }
+[ -e "$D/fail" ] && { echo "fake: devicectl failed" >&2; exit 1; }
+if [ -e "$D/ios.json" ]; then cat "$D/ios.json" > "$out"; else
+  printf '%s\n' '{"result":{"devices":[{"identifier":"ID-1","connectionProperties":{"pairingState":"paired","transportType":"wired","tunnelState":"connected"},"deviceProperties":{"name":"Phone 1","developerModeStatus":"enabled"},"hardwareProperties":{"reality":"physical","udid":"phone-1"}}]}}' > "$out"
+fi

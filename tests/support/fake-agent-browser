@@ -1,0 +1,26 @@
+#!/bin/bash
+# 验收用假 agent-browser。状态目录 $FAKE_BROWSER_DIR：sessions/<会话名> 存在 = 会话活着；fail_open 存在时打开失败；calls.log 记录每次调用。
+D="${FAKE_BROWSER_DIR:?FAKE_BROWSER_DIR 未设置}"
+mkdir -p "$D/sessions"
+echo "$*" >> "$D/calls.log"
+if [ "$1" = session ] && [ "$2" = list ]; then
+  printf '{"success":true,"data":{"sessions":['
+  sep=""
+  for f in "$D"/sessions/*; do
+    [ -e "$f" ] || continue
+    printf '%s"%s"' "$sep" "$(basename "$f")"; sep=","
+  done
+  printf ']}}\n'
+  exit 0
+fi
+[ "$1" = --session ] || { echo "fake-agent-browser: unknown $*" >&2; exit 2; }
+name="$2"
+case "$3" in
+  open)
+    touch "$D/sessions/$name"
+    [ -e "$D/fail_open" ] && { echo "fake: chrome failed to launch" >&2; exit 1; }
+    [ -n "$FAKE_BROWSER_OPEN_SECS" ] && sleep "$FAKE_BROWSER_OPEN_SECS"
+    echo "✓ about:blank" ;;
+  close) rm -f "$D/sessions/$name"; echo "✓ Browser closed" ;;
+  *) echo "fake-agent-browser: unknown $3" >&2; exit 2 ;;
+esac

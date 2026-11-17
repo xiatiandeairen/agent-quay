@@ -1,0 +1,56 @@
+{
+ "info": {
+  "outcome": "success"
+ },
+ "result": {
+  "devices": [
+   {
+    "identifier": "ID-11111111-2222-3333-4444-555555555555",
+    "connectionProperties": {
+     "pairingState": "paired",
+     "transportType": "sameMachine",
+     "tunnelState": "disconnected"
+    },
+    "deviceProperties": {
+     "name": "Sim 1"
+    },
+    "hardwareProperties": {
+     "reality": "simulated",
+     "udid": "11111111-2222-3333-4444-555555555555"
+    }
+   },
+   {
+    "identifier": "ID-00008150-000000000001AAAA",
+    "connectionProperties": {
+     "pairingState": "paired",
+     "transportType": "wired",
+     "tunnelState": "connected"
+    },
+    "deviceProperties": {
+     "name": "Phone 1",
+     "developerModeStatus": "enabled"
+    },
+    "hardwareProperties": {
+     "reality": "physical",
+     "udid": "00008150-000000000001AAAA"
+    }
+   },
+   {
+    "identifier": "ID-00008150-000000000002AAAA",
+    "connectionProperties": {
+     "pairingState": "paired",
+     "transportType": "localNetwork",
+     "tunnelState": "disconnected"
+    },
+    "deviceProperties": {
+     "name": "Phone 2",
+     "developerModeStatus": "enabled"
+    },
+    "hardwareProperties": {
+     "reality": "physical",
+     "udid": "00008150-000000000002AAAA"
+    }
+   }
+  ]
+ }
+}

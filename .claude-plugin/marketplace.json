@@ -1,0 +1,17 @@
+{
+  "name": "agent-quay",
+  "description": "aq: a local queue and device lender for parallel AI agent sessions on one Mac",
+  "owner": {
+    "name": "xiatiandeairen",
+    "url": "https://github.com/xiatiandeairen"
+  },
+  "plugins": [
+    {
+      "name": "agent-quay",
+      "source": "./",
+      "description": "Queue heavy builds and tests and lend simulators, devices and test accounts to parallel agent sessions",
+      "category": "development",
+      "tags": ["parallel-agents", "ios", "android", "build-queue"]
+    }
+  ]
+}

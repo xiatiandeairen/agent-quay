@@ -1,0 +1,13 @@
+#!/bin/bash
+# 验收用假 Android emulator。状态目录 $FAKE_EMU_DIR：running/<端口> 内容为本进程 pid；fail_boot 存在时直接退出（注入启动失败）。
+D="${FAKE_EMU_DIR:?FAKE_EMU_DIR 未设置}"; mkdir -p "$D/running"
+echo "$*" >> "$D/calls.log"
+port=""; avd=""
+while [ $# -gt 0 ]; do case "$1" in -port) port="$2"; shift ;; -avd) avd="$2"; shift ;; esac; shift; done
+[ -e "$D/fail_boot" ] && { echo "fake emulator: boot failed" >&2; exit 1; }
+echo "$avd" > "$D/avd.last"
+echo $$ > "$D/running/$port"
+# 只删自己的文件：同一端口上新起的实例可能已经写了新的 pid
+mine() { [ "$(cat "$D/running/$port" 2>/dev/null)" = "$$" ]; }
+trap 'mine && rm -f "$D/running/$port"; exit 0' TERM
+while mine; do sleep 0.2; done

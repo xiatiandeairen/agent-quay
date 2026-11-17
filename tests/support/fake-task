@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+# 验收用假任务：按参数真实占用内存和 CPU，按指定退出码结束。
+# fake-task --mem 4G --cpu 2 --secs 30 --exit 0 [--count FILE] [--out BYTES] [--touch FILE]
+#   --cpu-from FILE   占几核从文件读（命令文本不变 → 命令签名不变，用来造「历史轻、这次重」）
+#   --cpu-secs S      忙循环只跑前 S 秒，之后任务继续但不占 CPU（模拟链接阶段）
+#   --other-group     忙循环子进程另开进程组（像 xcodebuild 的 SWBBuildService）
+#   --burst N         不断起停 1 秒的短命子进程，同时约 N 个（模拟 xcodebuild 起停 clang）
+#   --kids N --kid-mem SIZE  起 N 个只占内存不占 CPU 的子进程（配 --other-group 时另开进程组）
+import argparse, os, subprocess, sys, time
+p = argparse.ArgumentParser()
+p.add_argument("--mem", default="0M"); p.add_argument("--cpu", type=int, default=0)
+p.add_argument("--secs", type=float, default=0); p.add_argument("--exit", type=int, default=0)
+p.add_argument("--cpu-from"); p.add_argument("--cpu-secs", type=float); p.add_argument("--burst", type=int, default=0)
+p.add_argument("--other-group", action="store_true")
+p.add_argument("--kids", type=int, default=0); p.add_argument("--kid-mem", default="0M")
+p.add_argument("--count"); p.add_argument("--out", type=int, default=0); p.add_argument("--touch")
+a = p.parse_args()
+if a.count:
+    with open(a.count, "a") as f: f.write(f"{os.getpid()}\n")
+def size(v): return int(float(v[:-1]) * (1024**3 if v[-1].upper() == "G" else 1024**2))
+buf = bytearray(size(a.mem))
+for i in range(0, len(buf), 4096): buf[i] = 1
+if a.cpu_from:
+    a.cpu = int(open(a.cpu_from).read().strip() or 0)
+pg = {"process_group": 0} if a.other_group else {}
+spin = [subprocess.Popen([sys.executable, "-c", "while True: pass"], **pg) for _ in range(a.cpu)]
+HOLD = f"import time\nb = bytearray({size(a.kid_mem)})\nfor i in range(0, len(b), 4096): b[i] = 1\ntime.sleep(3600)"
+spin += [subprocess.Popen([sys.executable, "-c", HOLD], **pg) for _ in range(a.kids)]
+chunk = b"x" * 65536
+left = a.out
+while left > 0:
+    w = min(left, len(chunk)); sys.stdout.buffer.write(chunk[:w]); left -= w
+sys.stdout.flush()
+SHORT = "import time\nt = time.time()\nwhile time.time() - t < 1: pass"
+def stop(ps):
+    for x in ps: x.kill()
+    for x in ps: x.wait()
+end = time.time() + a.secs
+burst = []
+while time.time() < end:
+    if a.cpu_secs is not None and spin and time.time() >= end - a.secs + a.cpu_secs:
+        stop(spin); spin = []
+    if a.burst:
+        burst = [x for x in burst if x.poll() is None]
+        while len(burst) < a.burst:
+            burst.append(subprocess.Popen([sys.executable, "-c", SHORT]))
+    time.sleep(min(0.05 if a.burst else 0.2, max(0, end - time.time())))
+if a.touch: open(a.touch, "w").close()
+stop(spin); stop(burst)
+sys.exit(a.exit)

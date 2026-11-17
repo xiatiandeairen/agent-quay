@@ -1,0 +1,22 @@
+#!/bin/bash
+# 验收用假 adb，配合 fake-emulator。真机：$FAKE_EMU_DIR/real-devices 存在就原样输出（每行 `id<TAB>状态 …`），否则报告 android-1 可用。$FAKE_EMU_BOOT_SECS：启动后多少秒 sys.boot_completed 才为 1（默认 0）。
+D="${FAKE_EMU_DIR:?FAKE_EMU_DIR 未设置}"; mkdir -p "$D/running"
+echo "$*" >> "$D/adb.log"
+serial=""
+if [ "$1" = -s ]; then serial="$2"; shift 2; fi
+port="${serial#emulator-}"
+case "$1" in
+  devices)
+    echo "List of devices attached"
+    for f in "$D"/running/*; do [ -e "$f" ] && printf 'emulator-%s\tdevice\n' "$(basename "$f")"; done
+    printf 'emulator-5554\tdevice\n'  # 用户自己开的模拟器，aq 不能碰
+    if [ -e "$D/real-devices" ]; then cat "$D/real-devices"; else printf 'android-1\tdevice usb:1-1 model:Pixel_9\n'; fi ;;
+  shell)
+    [ -e "$D/running/$port" ] || { echo "device not found" >&2; exit 1; }
+    age=$(( $(date +%s) - $(stat -f %m "$D/running/$port") ))
+    if [ "$age" -ge "${FAKE_EMU_BOOT_SECS:-0}" ]; then echo 1; else echo; fi ;;
+  emu)
+    [ -e "$D/running/$port" ] || { echo "device not found" >&2; exit 1; }
+    pid=$(cat "$D/running/$port"); rm -f "$D/running/$port"; kill "$pid" 2>/dev/null; echo "OK: killing emulator" ;;
+  *) echo "fake-adb: unknown $*" >&2; exit 2 ;;
+esac

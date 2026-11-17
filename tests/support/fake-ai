@@ -1,0 +1,15 @@
+#!/bin/bash
+# 验收用假 AI CLI。$FAKE_AI_DIR/mode：ok（默认）、garbage、slow、huge、fail、burn（先占满 1 核约 2 秒再按 ok 输出）；$FAKE_AI_DIR/calls 记录调用次数；
+# $FAKE_AI_DIR/ok.json 存在时作为 ok 模式的输出；prompt.txt 保存最后一次提示词。
+D="${FAKE_AI_DIR:?FAKE_AI_DIR 未设置}"
+mkdir -p "$D"; echo x >> "$D/calls"; cat > "$D/prompt.txt"; pwd > "$D/cwd.txt"
+mode=$(cat "$D/mode" 2>/dev/null || echo ok)
+[ -n "$FAKE_AI_SLEEP" ] && sleep "$FAKE_AI_SLEEP"
+if [ "$mode" = burn ]; then end=$((SECONDS + 2)); while [ $SECONDS -lt $end ]; do :; done; mode=ok; fi
+case "$mode" in
+  ok) if [ -e "$D/ok.json" ]; then cat "$D/ok.json"; else echo '{"heavy": true, "mem_gb": 1, "disk_gb": 0, "net": false, "est_minutes": 1, "reason": "fake"}'; fi ;;
+  garbage) echo "I think about 4GB?" ;;
+  huge) echo '{"heavy": true, "mem_gb": 1000, "disk_gb": 0, "net": false, "est_minutes": 1, "reason": "fake"}' ;;
+  slow) sleep 100 ;;
+  fail) exit 1 ;;
+esac

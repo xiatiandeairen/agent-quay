@@ -1,0 +1,30 @@
+#!/bin/bash
+# 验收用假 simctl。状态目录 $FAKE_SIM_DIR：devices/<udid> 内容为名字；fail_create、fail_boot 存在时注入失败；calls.log 记录每次调用。
+D="${FAKE_SIM_DIR:?FAKE_SIM_DIR 未设置}"
+mkdir -p "$D/devices"
+echo "$*" >> "$D/calls.log"
+case "$1" in
+  list)
+    if [ "$2" = runtimes ]; then
+      # 含一个只支持单一机型的运行时（真实机器上有），aq 不能选它
+      echo '{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-2","version":"26.2","isAvailable":true,"platform":"iOS","supportedDeviceTypes":[{"name":"iPhone 17 Pro"}]},{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-2","version":"27.2","isAvailable":true,"platform":"iOS","supportedDeviceTypes":[{"name":"iPhone 18 Pro"},{"name":"iPhone 17 Pro"}]},{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4","version":"27.2","isAvailable":true,"platform":"iOS","supportedDeviceTypes":[{"name":"iPhone Duo"}]}]}'
+    else
+      printf '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-27-2":['
+      sep=""
+      for f in "$D"/devices/*; do
+        [ -e "$f" ] || continue
+        printf '%s{"name":"%s","udid":"%s"}' "$sep" "$(cat "$f")" "$(basename "$f")"; sep=","
+      done
+      printf ']}}\n'
+    fi ;;
+  create)
+    [ -e "$D/fail_create" ] && { echo "fake: create failed" >&2; exit 1; }
+    [ -n "$FAKE_SIM_CREATE_SECS" ] && sleep "$FAKE_SIM_CREATE_SECS"
+    u=$(uuidgen); echo "$2" > "$D/devices/$u"; echo "$2 $3 $4" >> "$D/created.log"; echo "$u" ;;
+  boot|bootstatus)
+    [ -e "$D/fail_boot" ] && { echo "fake: boot failed" >&2; exit 1; }
+    exit 0 ;;
+  shutdown) exit 0 ;;
+  delete) [ -e "$D/devices/$2" ] || { echo "no such device" >&2; exit 1; }; rm -f "$D/devices/$2" ;;
+  *) echo "fake-simctl: unknown $1" >&2; exit 2 ;;
+esac
