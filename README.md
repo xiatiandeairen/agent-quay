@@ -42,6 +42,13 @@ The plugin gives every session the `aq` skill, so agents know when and how to us
 /plugin install agent-quay@agent-quay
 ```
 
+What the plugin contains:
+
+- The `aq` skill (`skills/aq/SKILL.md`): instructions that tell the agent when and how to call `aq`. It runs nothing by itself.
+- A SessionStart hook (`scripts/session-start.sh`): checks whether `aq` is on `PATH`. If it is missing, it adds one line to the session context asking the agent to tell the user to run `brew install xiatiandeairen/tap/aq`. It does not install anything, change any setting or use the network.
+
+The plugin does not ship the `aq` binary or any MCP server. Install `aq` separately as shown above.
+
 ## Usage
 
 ```bash
@@ -78,6 +85,15 @@ ids = ["00008150-…"]     # only devices listed here are ever lent
 - No daemon: every `aq` process works on one SQLite ledger under `~/.local/state/aq/`.
 - Resource needs come from past runs of the same command in the same repository. For a command seen for the first time, aq asks the calling agent's own CLI for an estimate if that agent is on its verified list (currently Claude Code and Codex); otherwise it uses a conservative default.
 - A borrowed device is reclaimed when the borrowing agent session exits, or after 2 hours idle when the session cannot be identified.
+
+## What aq runs
+
+aq only runs what an agent asks it to:
+
+- `aq run`: the given command, in its own process session, once there is room for it.
+- Code fingerprint: read-only `git` commands (`rev-parse`, `diff HEAD`, `ls-files`, `submodule status`) in the working directory, so identical runs can be shared.
+- `aq hold`: `xcrun simctl` to create, boot and delete simulators; the Android SDK `emulator` and `adb` for emulators; read-only `xcrun devicectl list devices` and `adb devices -l` to find real devices; `agent-browser` to open and close browser sessions. A `desktop` hold only hands out a session name.
+- First run of a new command: the calling agent's CLI, for an estimate (see Privacy).
 
 ## Privacy
 

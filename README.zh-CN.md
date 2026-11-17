@@ -42,6 +42,13 @@ cargo install --git https://github.com/xiatiandeairen/agent-quay --locked
 /plugin install agent-quay@agent-quay
 ```
 
+插件包含：
+
+- `aq` skill（`skills/aq/SKILL.md`）：告诉 agent 什么时候、怎么调用 `aq` 的说明，本身不运行任何东西。
+- 一个 SessionStart hook（`scripts/session-start.sh`）：检查 `PATH` 里有没有 `aq`；没有时往会话上下文加一行，让 agent 提醒用户运行 `brew install xiatiandeairen/tap/aq`。不安装任何东西，不改设置，不联网。
+
+插件不带 `aq` 程序本身，也没有 MCP server，`aq` 按上面的方式另装。
+
 ## 用法
 
 ```bash
@@ -78,6 +85,15 @@ ids = ["00008150-…"]     # 只借这里登记的真机
 - 没有常驻服务：所有 `aq` 进程共用 `~/.local/state/aq/` 下的一个 SQLite 账本。
 - 资源需求来自同一仓库里同一条命令的历史实测。第一次遇到的命令，如果调用方 agent 在已验证名单里（目前是 Claude Code 和 Codex），就请它自己的 CLI 估一次；否则用保守默认值。
 - 借出的设备在借用的 agent 会话退出后收回；认不出会话时，闲置 2 小时后收回。
+
+## aq 会运行什么
+
+aq 只运行 agent 让它运行的东西：
+
+- `aq run`：轮到时在独立的进程会话里运行给定的命令。
+- 代码指纹：在执行目录运行只读的 `git` 命令（`rev-parse`、`diff HEAD`、`ls-files`、`submodule status`），用来判断能不能共用同一次执行。
+- `aq hold`：用 `xcrun simctl` 新建、启动、删除模拟器；用 Android SDK 的 `emulator` 和 `adb` 管理安卓模拟器；用只读的 `xcrun devicectl list devices` 和 `adb devices -l` 查找真机；用 `agent-browser` 开关浏览器会话。借 `desktop` 只发一个会话名。
+- 第一次遇到某条命令：调用 agent 自己的 CLI 估算资源（见"隐私"）。
 
 ## 隐私
 
