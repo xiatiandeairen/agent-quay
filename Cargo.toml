@@ -5,7 +5,7 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 rust-version = "1.89"
-version = "0.2.0"
+version = "0.3.0"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/xiatiandeairen/agent-quay"
 
@@ -48,9 +48,9 @@ path = "tests/storage/main.rs"
 
 [dependencies]
 anyhow = "1.0.104"
-aq-core = { version = "0.2.0", path = "crates/aq-core" }
-aq-store = { version = "0.2.0", path = "crates/aq-store" }
-aq-sys = { version = "0.2.0", path = "crates/aq-sys" }
+aq-core = { version = "0.3.0", path = "crates/aq-core" }
+aq-store = { version = "0.3.0", path = "crates/aq-store" }
+aq-sys = { version = "0.3.0", path = "crates/aq-sys" }
 clap = { version = "4.6.7", features = ["derive"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
