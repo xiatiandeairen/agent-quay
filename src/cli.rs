@@ -3,7 +3,11 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
-#[command(name = "aq", version, about = "单机多 agent 资源调度：排队执行重任务、借还设备和账号")]
+#[command(
+    name = "aq",
+    version,
+    about = "Resource queue for many agents on one Mac: run heavy commands in turn, borrow and return devices and accounts"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub cmd: Cmd,
@@ -11,38 +15,38 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
-    /// 提交一条命令：aq run [--fresh] [--wait <秒>] [--human] -- <命令> [参数...]
+    /// Submit a command: aq run [--fresh] [--wait <secs>] [--human] -- <command> [args...]
     Run {
-        /// 不复用正在跑的同一次执行
+        /// Do not join an identical execution that is already queued or running
         #[arg(long)]
         fresh: bool,
-        /// 最多等多少秒（默认 100；0 只提交不等）
+        /// Wait at most this many seconds (default 100; 0 submits without waiting)
         #[arg(long)]
         wait: Option<u64>,
         #[arg(long)]
         human: bool,
-        /// `--` 之后的命令原样执行，不经过 shell
+        /// The command after `--` runs as is, without a shell
         #[arg(last = true)]
         cmd: Vec<String>,
     },
-    /// 查看全局或指定对象；--wait 等到全部结束或超时；--top 全屏仪表盘
+    /// Show the machine or the given ids; --wait waits until all finish or time runs out; --top shows a live dashboard
     Status {
         ids: Vec<String>,
         #[arg(long)]
         wait: Option<u64>,
         #[arg(long)]
         human: bool,
-        /// 英文仪表盘，终端里每 0.5 秒刷新，Ctrl-C 退出；输出不是终端时只打印一帧
+        /// Dashboard redrawn every 0.5s in a terminal, Ctrl-C to quit; prints one frame when stdout is not a terminal
         #[arg(long, conflicts_with_all = ["ids", "wait", "human"])]
         top: bool,
     },
-    /// 撤销排队中或运行中的执行
+    /// Cancel a queued or running execution; for a running one, waits until it has stopped
     Cancel {
         id: String,
         #[arg(long)]
         human: bool,
     },
-    /// 借一组设备和账号：aq hold <设备类型>... [--account <账号名>]...
+    /// Borrow a set of devices and accounts: aq hold <device type>... [--account <name>]...
     Hold {
         devices: Vec<String>,
         #[arg(long = "account")]
@@ -52,7 +56,7 @@ pub enum Cmd {
         #[arg(long)]
         human: bool,
     },
-    /// 整组归还
+    /// Return a whole hold
     Release {
         id: String,
         #[arg(long)]

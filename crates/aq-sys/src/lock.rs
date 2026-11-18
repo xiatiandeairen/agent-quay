@@ -18,12 +18,16 @@ impl LockDir {
 }
 
 pub fn try_lock_path(p: &Path) -> Result<Option<File>, String> {
-    let f =
-        OpenOptions::new().create(true).truncate(false).write(true).open(p).map_err(|e| format!("打开锁文件 {} 失败：{e}", p.display()))?;
+    let f = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(p)
+        .map_err(|e| format!("cannot open lock file {}: {e}", p.display()))?;
     match f.try_lock() {
         Ok(()) => Ok(Some(f)),
         Err(TryLockError::WouldBlock) => Ok(None),
-        Err(TryLockError::Error(e)) => Err(format!("加锁 {} 失败：{e}", p.display())),
+        Err(TryLockError::Error(e)) => Err(format!("cannot lock {}: {e}", p.display())),
     }
 }
 
@@ -59,12 +63,12 @@ pub fn set_cloexec(fd: RawFd, on: bool) -> Result<(), String> {
     // SAFETY: fcntl 只读写 fd 标志位。
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
     if flags < 0 {
-        return Err(format!("fcntl F_GETFD 失败：fd {fd}"));
+        return Err(format!("fcntl F_GETFD failed: fd {fd}"));
     }
     let new = if on { flags | libc::FD_CLOEXEC } else { flags & !libc::FD_CLOEXEC };
     // SAFETY: 同上。
     if unsafe { libc::fcntl(fd, libc::F_SETFD, new) } < 0 {
-        return Err(format!("fcntl F_SETFD 失败：fd {fd}"));
+        return Err(format!("fcntl F_SETFD failed: fd {fd}"));
     }
     Ok(())
 }

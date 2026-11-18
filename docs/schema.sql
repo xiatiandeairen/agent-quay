@@ -1,4 +1,4 @@
--- 迁移到最新版本后的完整结构（当前版本 2），由测试与 crates/aq-store/migrations/ 比对。
+-- 迁移到最新版本后的完整结构（当前版本 3），由测试与 crates/aq-store/migrations/ 比对。
 CREATE TABLE executions (
   id TEXT PRIMARY KEY,
   hash TEXT,
@@ -22,7 +22,7 @@ CREATE TABLE executions (
   exit_code INTEGER,
   peak_mem_mb INTEGER,
   cpu_avg_cores REAL,
-  disk_delta_mb INTEGER,
+  disk_delta_mb INTEGER, worktree TEXT, disk_reliable INTEGER CHECK (disk_reliable IN (0,1)),
   CHECK (status <> 'running' OR (started_at IS NOT NULL AND pgid IS NOT NULL AND pgid_started_at IS NOT NULL AND heavy IS NOT NULL)),
   CHECK (status IN ('queued','running') OR finished_at IS NOT NULL),
   CHECK ((exit_code IS NOT NULL) = (status IN ('ok','failed'))),
@@ -71,6 +71,7 @@ CREATE UNIQUE INDEX one_inflight ON executions(hash) WHERE status IN ('queued','
 CREATE UNIQUE INDEX one_device_holder ON hold_devices(device);
 CREATE INDEX exec_queue ON executions(status, submitted_at);
 CREATE INDEX exec_profile ON executions(profile_key, finished_at);
+CREATE INDEX exec_worktree ON executions(profile_key, worktree, finished_at);
 CREATE INDEX hold_queue ON holds(status, requested_at);
 
 CREATE TRIGGER executions_terminal_immutable BEFORE UPDATE OF status ON executions

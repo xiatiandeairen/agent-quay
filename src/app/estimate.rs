@@ -1,7 +1,7 @@
 //! runner 的资源评估：实测 → AI 评估缓存（内存不超过全机 p90）→ 首次见到按轻任务立即放行。
 //! AI CLI 不在放行路径上：首次见到的命令放行后由 runner 在后台线程里评估一次并缓存（同签名只调一次）。
 
-use aq_core::estimate::{cap_ai, first_seen, from_history, parse_ai, Estimate};
+use aq_core::estimate::{cap_ai, disk_upper, first_seen, from_history, parse_ai, Estimate};
 use aq_core::ports::AiCli;
 use aq_core::signature::signature;
 use aq_store::{ExecRow, Profile, Store};
@@ -100,10 +100,10 @@ fn ask_ai(ctx: &Ctx, store: &mut Store, e: &ExecRow) -> AppResult<Option<Estimat
         }
         (_, out) => {
             let why = match out {
-                Ok(t) => format!("输出不合格：{}", t.chars().take(200).collect::<String>()),
+                Ok(t) => format!("invalid output: {}", t.chars().take(200).collect::<String>()),
                 Err(e) => e,
             };
-            ctx.log_note(&e.id, &format!("AI 评估失败，不写缓存：{why}"));
+            ctx.log_note(&e.id, &format!("AI estimate failed, not cached: {why}"));
             let _ = std::fs::write(&failed_mark, b""); // 标记写失败只会让并发请求多调一次 AI
             Ok(None)
         }
@@ -122,7 +122,12 @@ fn profile_estimate(ctx: &Ctx, p: &Profile) -> Estimate {
 pub fn estimate(ctx: &Ctx, store: &mut Store, e: &ExecRow) -> AppResult<Estimate> {
     let profile = aq_store::get_profile(store.conn(), &e.profile_key)?;
     let hist = aq_store::history(store.conn(), &e.profile_key)?;
-    if let Some(est) = from_history(&hist, profile.as_ref().map(|p| p.res.uses_net), &ctx.limits) {
+    if let Some(mut est) = from_history(&hist, profile.as_ref().map(|p| p.res.uses_net), &ctx.limits) {
+        // 磁盘另算：按 worktree 区分冷编和增量编，优先用可靠的实测（CASE-EST-16、CASE-EST-17）
+        let disk = aq_store::disk_samples(store.conn(), &e.profile_key, e.worktree.as_deref())?;
+        if let Some(d) = disk_upper(&disk) {
+            est.res.disk_mb = d;
+        }
         return Ok(est);
     }
     let mh = aq_store::machine_history(store.conn())?;
@@ -145,6 +150,6 @@ pub fn learn(ctx: &Ctx, e: &ExecRow) {
     }
     let r = aq_store::Store::open(&ctx.dirs.db).map_err(super::error::AppError::from).and_then(|mut s| ask_ai(ctx, &mut s, e));
     if let Err(err) = r {
-        ctx.log_note(&e.id, &format!("后台 AI 评估出错：{err:?}"));
+        ctx.log_note(&e.id, &format!("background AI estimate failed: {err:?}"));
     }
 }

@@ -77,6 +77,7 @@ heavy_slots = 2          # heavy tasks at the same time
 mem = "28G"              # memory aq may hand out; default 3/4 of RAM
 sim_slots = 4            # iOS simulators + Android emulators at once; default one per 8 GB of RAM
 disk_floor = "50G"       # keep at least this much disk free
+nice = 10                # CPU priority of everything aq starts (0-20, 0 = off)
 ai_cli = "auto"          # or a fixed command, e.g. "claude -p"
 
 [ios-sim]

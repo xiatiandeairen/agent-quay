@@ -2,7 +2,7 @@
 //! 只依赖 aq-core；实现 aq-core::ports 里的 trait。仅支持 macOS。
 
 #[cfg(not(target_os = "macos"))]
-compile_error!("aq 只支持 macOS（进程探测用 libproc，模拟器用 simctl）");
+compile_error!("aq supports macOS only (it uses libproc for processes and simctl for simulators)");
 
 pub mod agent;
 pub mod ai;

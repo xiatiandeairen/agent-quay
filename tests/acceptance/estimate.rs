@@ -176,8 +176,115 @@ fn unverified_or_unknown_agent_uses_first_seen_without_ai() {
     let e = Env::new();
     let id = run_under_claude_process(&e, &[("CURSOR_AGENT", "1")]);
     assert_eq!(e.ai_calls(), 0, "Cursor 不在已验证表：不调任何 AI CLI，即使链上有名为 claude 的进程");
-    assert!(e.aq(&["status", &id, "--human"]).stdout.contains("评估来自首次见到（按轻任务）"));
+    assert!(e.aq(&["status", &id, "--human"]).stdout.contains("estimate from first seen (booked as light)"));
     let f = Env::new();
     run_under_claude_process(&f, &[("CLAUDECODE", "1")]);
     assert_eq!(f.ai_calls(), 1, "认出 Claude Code：调它的 CLI 评估");
+}
+
+fn disk_of(e: &Env, id: &str) -> i64 {
+    e.q_i64(&format!("SELECT disk_mb FROM executions WHERE id='{id}'"))
+}
+
+fn delta_of(e: &Env, id: &str) -> (i64, i64) {
+    e.db()
+        .query_row(&format!("SELECT disk_delta_mb, disk_reliable FROM executions WHERE id='{id}'"), [], |x| Ok((x.get(0)?, x.get(1)?)))
+        .unwrap()
+}
+
+// CASE-EST-15
+#[test]
+fn disk_written_while_queued_is_not_counted() {
+    let e = Env::with_config(&DEFAULT_CONFIG.replace("heavy_slots = 2", "heavy_slots = 1"));
+    let a = e.aq(&["run", "--wait", "0", "--", "fake-task", "--disk-mb", "2000", "--secs", "2"]);
+    assert!(until(10, || e.aq(&["status", &a.id()]).status() == "running"));
+    let b = e.aq(&["run", "--wait", "0", "--", "fake-task", "--disk-mb", "100", "--secs", "0.3"]);
+    assert_eq!(e.aq(&["status", &b.id()]).status(), "queued", "名额只有 1 个，B 要排队");
+    assert_eq!(e.wait_status(&b.id(), 20, &["ok"]).status(), "ok");
+    assert_eq!(delta_of(&e, &a.id()).0, 2000);
+    assert_eq!(delta_of(&e, &b.id()).0, 100, "排队期间 A 写的 2000MB 不算 B 的");
+}
+
+// CASE-EST-16
+#[test]
+fn disk_estimate_split_by_worktree() {
+    let e = Env::new();
+    let repo = e.path("repo");
+    git_repo(&repo);
+    let wt = |n: &str| {
+        let p = e.path(n);
+        git(&repo, &["worktree", "add", "-q", "--detach", p.to_str().unwrap()]);
+        p
+    };
+    let (a, b, c) = (repo.clone(), wt("wt-b"), wt("wt-c"));
+    let (mb, exit) = (e.path("disk-mb"), e.path("exit"));
+    let mb_s = mb.to_str().unwrap().to_string();
+    let run = |dir: &std::path::Path, disk: i64, code: i64, wait: &str| {
+        std::fs::write(&mb, disk.to_string()).unwrap();
+        std::fs::write(&exit, code.to_string()).unwrap();
+        let args = ["run", "--fresh", "--wait", wait, "--", "sh", "-c", "fake-task --disk-from \"$0\" --exit \"$(cat \"$1\")\""];
+        let mut v: Vec<&str> = args.to_vec();
+        v.push(&mb_s);
+        v.push(exit.to_str().unwrap());
+        e.aq_in(dir, &v)
+    };
+    // worktree A：冷编 10G 成功，之后 3 次增量
+    for disk in [10_000, 300, 0, 100] {
+        assert_eq!(run(&a, disk, 0, "30").status(), "ok");
+    }
+    // worktree C：第一次很快失败（没写），第二次才是冷编
+    assert_eq!(run(&c, 0, 1, "30").status(), "failed");
+    assert_eq!(run(&c, 9_000, 0, "30").status(), "ok");
+    // 三处各提交一次，让它们都排队（可用内存不够），只看估值
+    e.set_sys(10, 500_000);
+    let pa = run(&a, 0, 0, "0");
+    let pb = run(&b, 0, 0, "0");
+    let pc = run(&c, 0, 0, "0");
+    for p in [&pa, &pb, &pc] {
+        assert!(until(10, || e.q_i64(&format!("SELECT disk_mb IS NOT NULL FROM executions WHERE id='{}'", p.id())) == 1));
+    }
+    assert_eq!(disk_of(&e, &pa.id()), 330, "A 只看第一次成功之后的 300、0、100：加权 p90 300 × 1.1");
+    assert!(disk_of(&e, &pb.id()) >= 9_000, "B 没跑过，按整类命令（冷编）估：{}", disk_of(&e, &pb.id()));
+    assert!(disk_of(&e, &pc.id()) >= 9_000, "C 第一次成功之后还没有实测，按冷编估：{}", disk_of(&e, &pc.id()));
+    let mems: Vec<i64> = [&pa, &pb, &pc].iter().map(|p| mem_of(&e, &p.id())).collect();
+    assert!(mems.iter().all(|m| *m == mems[0]), "内存仍按整类命令估，三处相同：{mems:?}");
+}
+
+// CASE-EST-17
+#[test]
+fn overlapped_runs_are_unreliable() {
+    let e = Env::new();
+    let alone = e.aq(&["run", "--", "fake-task", "--disk-mb", "100"]);
+    assert_eq!(delta_of(&e, &alone.id()), (100, 1), "单独运行：可靠");
+
+    let bg = e.aq(&["run", "--wait", "0", "--", "fake-task", "--secs", "3"]);
+    assert!(until(10, || e.aq(&["status", &bg.id()]).status() == "running"));
+    let with_exec = e.aq(&["run", "--", "fake-task", "--disk-mb", "100", "--secs", "0.5"]);
+    assert_eq!(delta_of(&e, &with_exec.id()).1, 0, "有别的执行在跑：不可靠");
+    e.wait_status(&bg.id(), 20, &["ok"]);
+
+    e.env("FAKE_SIM_CREATE_SECS", "3");
+    let h = e.aq(&["hold", "ios-sim", "--wait", "0"]);
+    assert_eq!(h.status(), "waiting");
+    let with_sim = e.aq(&["run", "--", "fake-task", "--disk-mb", "100", "--secs", "0.5"]);
+    assert_eq!(delta_of(&e, &with_sim.id()).1, 0, "aq 正在建模拟器：不可靠");
+}
+
+// CASE-EST-17
+#[test]
+fn only_unreliable_samples_take_min() {
+    let e = Env::new();
+    let bg = e.aq(&["run", "--wait", "0", "--", "fake-task", "--secs", "30"]);
+    assert!(until(10, || e.aq(&["status", &bg.id()]).status() == "running"));
+    let mb = e.path("disk-mb");
+    let mb_s = mb.to_str().unwrap().to_string();
+    for disk in [3_000, 8_000, 5_000] {
+        std::fs::write(&mb, disk.to_string()).unwrap();
+        assert_eq!(e.aq(&["run", "--fresh", "--", "fake-task", "--disk-from", &mb_s]).status(), "ok");
+    }
+    e.set_sys(10, 500_000);
+    let p = e.aq(&["run", "--fresh", "--wait", "0", "--", "fake-task", "--disk-from", &mb_s]);
+    assert!(until(10, || e.q_i64(&format!("SELECT disk_mb IS NOT NULL FROM executions WHERE id='{}'", p.id())) == 1));
+    assert_eq!(disk_of(&e, &p.id()), 3_000, "全是不可靠实测时取最小值");
+    e.aq(&["cancel", &bg.id()]);
 }

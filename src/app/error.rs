@@ -22,7 +22,9 @@ impl AppError {
     pub fn to_json(&self) -> serde_json::Value {
         match self {
             AppError::Usage(m) => serde_json::json!({"status": "rejected", "reason": "usage", "message": m}),
-            AppError::Busy => serde_json::json!({"reason": "busy", "message": "数据库忙：等写锁超过 5 秒，数据未改，请稍后重试"}),
+            AppError::Busy => {
+                serde_json::json!({"reason": "busy", "message": "database busy: waited over 5s for the write lock, nothing changed; retry later"})
+            }
             AppError::Fatal(m) => serde_json::json!({"message": m}), // 环境错误（目录不可写等）：文档未定义 reason，只给说明
         }
     }

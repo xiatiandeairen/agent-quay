@@ -55,6 +55,10 @@
 | CASE-EST-12 | 运行中实际内存超过估计 | 不中止；实际余量不足时后续任务不放行 | 集成 |
 | CASE-EST-13 | 第一次出现的命令（没有实测、没有 AI 评估缓存），AI 评估要 30 秒；本机没有任何实测；本机已有实测 | 从提交到开始不到 1 秒，按轻任务、不占下载名额、超时 2 小时；内存没有实测时 1G，有实测时取全机实测峰值中位数（不低于 256MB）；AI 在后台照样评估一次。实际很重的由运行中纠正改记（CASE-EST-10） | 单元；集成 |
 | CASE-EST-14 | AI 评估缓存说要 12G，本机实测峰值 p90 只有 227MB；本机没有实测 | 前者按 256MB 记账（p90 低于下限时抬到下限）；后者按 AI 的 12G | 单元 |
+| CASE-EST-15 | 任务排队期间另一个任务写了 2000MB，它自己运行时写 100MB | 记下的磁盘增量是 100MB，不含排队期间别人写的 | 集成 |
+| CASE-EST-16 | 同一类命令：worktree A 冷编 10G 成功后又跑了 3 次（300MB、0、100MB）；worktree B 没跑过；worktree C 第一次很快失败、第二次冷编 9G | A 只按第一次成功之后的实测估磁盘（330MB）；B、C 按整类命令估（≥ 9G）；内存三处相同 | 集成 |
+| CASE-EST-17 | 运行期间有别的执行在跑、aq 正在建模拟器、单独运行；有可靠实测时；只有不可靠实测（3G、8G、5G）时 | 前两种的磁盘实测标为不可靠，单独运行的可靠；估磁盘只用可靠的；只有不可靠的时取最小值 3G；内存、CPU 实测照常使用 | 单元；集成 |
+| CASE-EST-18 | 从旧版本账本升级 | 旧记录的磁盘可靠性为空、没有 worktree，估磁盘时按不可靠处理 | 集成 |
 
 ## 排队与放行
 
@@ -62,11 +66,17 @@
 |---|---|---|---|
 | CASE-QUEUE-1 | 同时提交多个重任务（含多个会话混合提交编译、测试和借用） | 任何时刻运行中的重任务不超过名额（默认 2）；全部最终进入终态 | 单元；集成 |
 | CASE-QUEUE-2 | 记账内存之和超过容量；aq 以外的程序占掉大量内存；磁盘低于底线；同时下载的任务名额已满 | 新任务排队等待，不失败；条件恢复后开始 | 单元；集成 |
-| CASE-QUEUE-3 | 排头在等某种资源，后来的任务分别要这种资源、不要这种资源（含编译和借用混排） | 不要的可以先开始；要的不插队，排头缺的资源不被后来者占走 | 单元；集成 |
-| CASE-QUEUE-4 | 排头在等资源 | 最晚在当前运行任务的最长超时内开始 | 集成 |
+| CASE-QUEUE-3 | 排头在等某种资源，后来的任务分别要这种资源、不要这种资源（含编译和借用混排） | 不要的可以先开始；要的不插队，排头缺的资源不被后来者占走；被挡的任务带 `blocked_by: <排头 id>`，`waiting_for` 只列排头占着、它也要的那几类 | 单元；集成 |
+| CASE-QUEUE-4 | 排头在等用完会还的资源（重任务名额、内存、下载名额、设备、账号、靠等能等到的磁盘） | 最晚在当前运行任务的最长超时内开始；`disk_full` 不受这条约束，要人清理 | 集成 |
 | CASE-QUEUE-5 | 账面和实际余量都够；系统内存压力为 warn 或 critical；或距上次采样换出超过 64MB；压力回落 | 前者放行；后两者要内存的执行和借用都不放行（queued/waiting），`aq status <id>` 带 `waiting_for: ["mem_pressure"]` 和 `retry_after_s`，不要内存的（真机）照常借；回落后自动放行。被压力挡住时另带 `mem_pressure_s`（已持续秒数）；超过 10 分钟仍排队、不失败，另加 `message` 说明压力来自 aq 以外的程序 | 单元；集成 |
 | CASE-QUEUE-6 | 同时来 3 个借 ios-sim 的请求（每台建 2 秒以上） | 任何时刻最多一台 iOS 模拟器或 Android 实例在冷启动；其余 waiting，带 `waiting_for: ["cold_start"]` 和 `retry_after_s`；三台最终都借到。浏览器会话不受限 | 单元；集成；真 simctl：实机 |
 | CASE-QUEUE-7 | 配置里没写 `mem`、`sim_slots`，物理内存 36G、16G、64G；写了；读不到物理内存 | 内存容量为物理内存 3/4（36G → 27G，16G → 12G），模拟器台数上限每 8G 一台（4、2、8 台，至少 1 台）；写了以配置为准；读不到时 28G、4 台 | 单元；集成 |
+| CASE-QUEUE-8 | 剩余 57G、底线 50G、排头要 12G、没有运行中任务，后面有 186MB 和 3G 的任务；另一种：运行中任务记账 8G、结束后就够 | 前者排头 `waiting_for: ["disk_full"]`，带英文 `message` 写明还差 5.0 GB、需要人清理磁盘；186MB 和 3G 的立即开始，不带 `blocked_by`。后者排头 `waiting_for: ["disk"]`，磁盘仍预留，后来要磁盘的带 `blocked_by` | 单元；集成 |
+| CASE-QUEUE-9 | 排头同时缺内存和等不到的磁盘；后面有要内存的任务、只要磁盘的任务 | 内存仍预留给排头：要内存的带 `blocked_by`；只要磁盘的放得下就开始 | 单元 |
+| CASE-QUEUE-10 | 排头只缺等不到的磁盘；第二个任务缺内存；第三个任务放得下但要内存 | 第二个接手当排头、内存预留给它；第三个带 `blocked_by: <第二个>` | 单元 |
+| CASE-QUEUE-11 | 剩余空间已低于底线；有要 100MB 磁盘的任务、估值为 0 的任务 | 前者 `disk_full`；后者照常开始 | 单元 |
+| CASE-QUEUE-12 | `disk_full` 期间腾出了足够空间 | 下一轮检查内开始，不需要重新提交 | 集成 |
+| CASE-QUEUE-13 | 任务被排头预留挡住一段时间后放行 | `aq.log` 里有一行 `admitted after <秒>s blocked by <排头> on [<资源>]` | 集成 |
 
 ## 借用
 
@@ -112,9 +122,32 @@
 | 编号 | 场景 | 预期效果 | 验证 |
 |---|---|---|---|
 | CASE-CANCEL-1 | 撤销 queued 的执行 | cancelled，命令从未执行 | 集成 |
-| CASE-CANCEL-2 | 撤销 running 的执行 | 10 秒内整个进程组结束，状态 cancelled；共用这次执行的调用方都拿到 cancelled | 集成 |
+| CASE-CANCEL-2 | 撤销 running 的执行，命令正常响应 SIGTERM | cancel 返回时已是 cancelled、退出码 0、进程组已结束；共用这次执行的调用方都拿到 cancelled | 集成 |
 | CASE-CANCEL-3 | 撤销已结束的执行；对已结束的借用再 release | 原样返回当前状态 | 集成 |
 | CASE-CANCEL-4 | 撤销和放行同时发生 | 要么命令从未启动，要么启动后被终止；不会出现命令在跑、状态却是 cancelled | 集成 |
+| CASE-CANCEL-5 | 撤销忽略 SIGTERM 的命令 | 宽限期后 SIGKILL；cancel 在宽限期 + 5 秒内返回 cancelled | 集成 |
+| CASE-CANCEL-6 | 进程组在 cancel 的等待上限（宽限期 + 5 秒）内结束不了 | 返回 running + `cancel_requested: true`，退出码 0；之后 status 读回 cancelled | 集成 |
+| CASE-CANCEL-7 | 撤销时命令刚好自己结束 | 返回实际终态（ok 或 failed），不改写成 cancelled | 集成 |
+| CASE-CANCEL-8 | 两个 cancel 同时撤销同一个执行 | 两个都返回 cancelled；进程组只终止一次，aq.log 里只有一条转为 cancelled 的记录 | 集成 |
+| CASE-CANCEL-9 | cancel 等待期间被 Ctrl-C 打断 | 撤销请求已写入，命令仍被终止，最终 cancelled | 集成 |
+| CASE-CANCEL-10 | runner 已被杀、命令还在跑时撤销 | cancel 自己终止进程组（核对组长进程号和启动时间，不误杀复用同号的新进程），宽限期 + 5 秒内返回 cancelled | 集成 |
+
+## 电脑保护
+
+| 编号 | 场景 | 预期效果 | 验证 |
+|---|---|---|---|
+| CASE-PROT-1 | 默认配置下 `aq run` 一个会再拉起子进程的命令 | 命令和子进程的 nice 都是 10 | 集成 |
+| CASE-PROT-2 | 配置 `nice = 0`；配置 `nice = 25` | 前者命令 nice 为 0；后者任意 aq 命令返回 rejected usage，消息说明 nice 的范围 | 集成 |
+| CASE-PROT-3 | aq 起 Android 模拟器、浏览器会话 | 这些进程的 nice 都是配置值 | 集成 |
+| CASE-PROT-4 | 两次冷编同时跑，前台每 5 秒跑一次 `python3 -c 'import json'`，改前（0.3.0）改后各测一次 | 改后探针 p95 < 1 秒、最大 < 3 秒（假设，看到改前基线后校准）；编译变慢 ≤ 10%；数字写进 design.md | 实机 |
+
+## 输出语言
+
+| 编号 | 场景 | 预期效果 | 验证 |
+|---|---|---|---|
+| CASE-LANG-1 | 全部集成用例里的每一次 aq 调用，加上各子命令的 `--help`、写法错误、未知子命令、配置写错 | stdout、stderr 都没有中日韩文字和全角标点（集成测试的公共封装统一检查） | 集成 |
+| CASE-LANG-2 | 每个集成用例结束时的 aq.log（含失败、找不到命令、借还设备的完整过程） | 没有中日韩文字和全角标点 | 集成 |
+| CASE-LANG-3 | 执行目录、命令参数里有中文 | 原样回显，不算违规；其余文字是英文 | 集成 |
 
 ## 状态与输出
 
@@ -122,8 +155,8 @@
 |---|---|---|---|
 | CASE-STATUS-1 | `aq status` 不带 id | 第一行是全机概况，恰好 7 个字段，数值与系统差 5 个百分点内（CPU 是实际使用率，不是平均负载）；之后列出全机所有活动的执行和未归还的借用 | 单元；集成 |
 | CASE-STATUS-2 | `aq status <id1> <id2> --wait 30` | 等到都结束或超时；每个对象一行；退出码取最大 | 集成 |
-| CASE-STATUS-3 | 所有命令的输出 | 每个对象一行 JSON，字段只在适用时出现（`reused` 只在 `aq run` 的返回里有，status、cancel 不带）；退出码：ok/held/released/reclaimed 为 0，failed/timeout/interrupted/cancelled 为 1，queued/running/waiting 为 2，rejected 为 3；cancel、release 被接受即 0 | 集成 |
-| CASE-STATUS-4 | 任意命令加 `--human` | 输出易读文本，含在等什么、评估来源、借用者、状态目录；退出码与不加相同 | 集成 |
+| CASE-STATUS-3 | 所有命令的输出 | 每个对象一行 JSON，字段只在适用时出现（`reused` 只在 `aq run` 的返回里有，status、cancel 不带）；退出码：ok/held/released/reclaimed 为 0，failed/timeout/interrupted/cancelled 为 1，queued/running/waiting 为 2，rejected 为 3；cancel、release 被接受即 0；cancel 只在等不到终态、返回 running 时带 `cancel_requested: true` | 集成 |
+| CASE-STATUS-4 | 任意命令加 `--human`；在等 `disk_full`、被排头挡住的任务加 `--human` | 输出易读文本，含在等什么、评估来源、借用者、状态目录；退出码与不加相同。`disk_full` 显示还差多少、需要人清理；被挡的显示挡住它的排头 id | 集成 |
 | CASE-STATUS-5 | 配置文件有未知字段或写错一行 | 任意 aq 命令返回 rejected usage，消息带行号 | 单元；集成 |
 | CASE-STATUS-6 | `aq status --top` | 英文仪表盘：CPU、内存、磁盘的占用条和重任务名额条，每个活动的执行、借用各一行（状态、时长、命令或设备、在等什么）；在终端里每 0.5 秒原地重画，Ctrl-C 退出；输出不是终端时只画一帧，退出码 0；与 id、`--wait`、`--human` 同用返回 rejected usage | 单元；集成 |
 

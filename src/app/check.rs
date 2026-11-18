@@ -74,7 +74,7 @@ fn apply(ctx: &Ctx, c: &Conn, a: &Action, guards: &mut HashMap<String, File>) ->
     match a {
         Action::Interrupt(id) => {
             if aq_store::interrupt(c, id, now)? {
-                ctx.log_transition(id, "running", "interrupted", "runner 和命令进程都已不在");
+                ctx.log_transition(id, "running", "interrupted", "runner and command are both gone");
             }
         }
         Action::RespawnExec(id) | Action::RespawnHold(id) => {
@@ -84,14 +84,14 @@ fn apply(ctx: &Ctx, c: &Conn, a: &Action, guards: &mut HashMap<String, File>) ->
             let Some(lock) = guards.remove(id) else { return Ok(false) };
             let fd = inheritable(&lock).map_err(AppError::Fatal)?;
             spawn::runner(ctx, id, fd)?;
-            ctx.log_note(id, "runner 已不在，重新拉起，保持排队位置");
+            ctx.log_note(id, "runner was gone; restarted it, queue position kept");
         }
         Action::Reclaim(id, why) => {
             if aq_store::end_hold(c, id, HoldStatus::Reclaimed, now)? {
                 ctx.clear_hold_files(id);
                 let reason = match why {
-                    ReclaimReason::OwnerExit => "借用者进程已退出",
-                    ReclaimReason::Idle => "闲置超过上限",
+                    ReclaimReason::OwnerExit => "holder process exited",
+                    ReclaimReason::Idle => "idle past the limit",
                 };
                 ctx.log_transition(id, "held", "reclaimed", reason);
                 return Ok(true);

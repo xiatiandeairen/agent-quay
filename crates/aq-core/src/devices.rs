@@ -15,22 +15,22 @@ pub struct Seen {
     pub problem: Option<String>,
 }
 
-pub const NOT_FOUND: &str = "Mac 找不到（关机、没连线或不在同一网络）";
+pub const NOT_FOUND: &str = "the Mac cannot find it (powered off, not connected, or on another network)";
 
 /// `devicectl list devices --json-output` 的输出 → 真机列表（模拟器跳过）。
 /// 可用 = 已配对 + 开发者模式已开 + 有线或同网无线；调试通道（tunnelState）用时才建，不作条件。
 pub fn parse_devicectl(text: &str) -> Result<Vec<Seen>, String> {
-    let v: Value = serde_json::from_str(text).map_err(|e| format!("devicectl 输出看不懂：{e}"))?;
-    let list = v["result"]["devices"].as_array().ok_or("devicectl 输出里没有 result.devices")?;
+    let v: Value = serde_json::from_str(text).map_err(|e| format!("cannot parse devicectl output: {e}"))?;
+    let list = v["result"]["devices"].as_array().ok_or("devicectl output has no result.devices")?;
     let mut out = vec![];
     for d in list.iter().filter(|d| d["hardwareProperties"]["reality"] == "physical") {
         let id = d["hardwareProperties"]["udid"].as_str().or_else(|| d["identifier"].as_str()).unwrap_or_default();
         let name = d["deviceProperties"]["name"].as_str().unwrap_or(id);
         let conn = &d["connectionProperties"];
         let problem = if conn["pairingState"] != "paired" {
-            Some("未配对（在 Xcode 里配对并信任这台 Mac）".to_string())
+            Some("not paired (pair it in Xcode and trust this Mac)".to_string())
         } else if d["deviceProperties"]["developerModeStatus"] != "enabled" {
-            Some("开发者模式未开启".to_string())
+            Some("Developer Mode is off".to_string())
         } else if !matches!(conn["transportType"].as_str(), Some("wired" | "localNetwork")) {
             Some(NOT_FOUND.to_string())
         } else {
@@ -53,9 +53,9 @@ pub fn parse_adb(text: &str) -> Vec<Seen> {
         let name = f.find_map(|kv| kv.strip_prefix("model:")).map_or(id.to_string(), |m| m.replace('_', " "));
         let problem = match state {
             "device" => None,
-            "unauthorized" => Some("没授权 USB 调试（在手机上点允许）".to_string()),
-            "offline" => Some("离线（重新插拔或重连无线调试）".to_string()),
-            s => Some(format!("adb 状态为 {s}")),
+            "unauthorized" => Some("USB debugging not authorized (tap Allow on the phone)".to_string()),
+            "offline" => Some("offline (replug, or reconnect wireless debugging)".to_string()),
+            s => Some(format!("adb state is {s}")),
         };
         out.push(Seen { kind: DeviceType::AndroidDevice, id: id.to_string(), name, problem });
     }
@@ -118,10 +118,10 @@ pub fn judge(req: &HoldRequest, cap: &Capacity, scans: &[(DeviceType, Result<Vec
         let usable = declared.len() - down.len();
         if v.reject.is_none() {
             if want > declared.len() {
-                v.reject = Some(("unschedulable", format!("要 {want} 台 {t}，清单里只有 {} 台", declared.len())));
+                v.reject = Some(("unschedulable", format!("needs {want} {t}, only {} declared", declared.len())));
             } else if want > usable {
-                let list: Vec<String> = down.iter().map(|d| format!("{}：{}", d.name, d.why)).collect();
-                v.reject = Some(("device_unavailable", format!("要 {want} 台 {t}，此刻可用 {usable} 台。{}", list.join("；"))));
+                let list: Vec<String> = down.iter().map(|d| format!("{}: {}", d.name, d.why)).collect();
+                v.reject = Some(("device_unavailable", format!("needs {want} {t}, {usable} available right now. {}", list.join("; "))));
             }
         }
         v.exclude.extend(down.iter().map(|d| d.id.clone()));

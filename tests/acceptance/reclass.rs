@@ -19,7 +19,7 @@ fn heavy_of(e: &Env, id: &str) -> i64 {
 }
 
 fn reclassified(e: &Env, id: &str) -> bool {
-    e.aq_log().lines().any(|l| l.contains(id) && l.contains("改记重任务"))
+    e.aq_log().lines().any(|l| l.contains(id) && l.contains("now booked as heavy"))
 }
 
 /// 同一条命令（命令文本固定，--cpu-from 文件决定这次占几核）。
@@ -83,7 +83,7 @@ fn reclassified_task_blocks_new_heavy_until_slots_free() {
     let y = e.aq(&["run", "--fresh", "--wait", "0", "--", "fake-task", "--secs", "1"]);
     std::thread::sleep(std::time::Duration::from_millis(500));
     let s = e.aq(&["status", &y.id(), "--human"]);
-    assert!(s.stdout.contains("重任务名额"), "{}", s.stdout);
+    assert!(s.stdout.contains("heavy slot"), "{}", s.stdout);
     assert_eq!(heavy_running(&e), 3, "超出 1 个，X 不中止");
     assert_eq!(e.aq(&["status", &y.id(), "--wait", "30"]).status(), "ok");
     let at = |col: &str, id: &str| e.q_i64(&format!("SELECT {col} FROM executions WHERE id = '{id}'"));
@@ -115,7 +115,7 @@ fn reclassification_never_reverts() {
     assert!(until(8, || heavy_of(&e, &r.id()) == 1));
     assert_eq!(e.aq(&["status", &r.id(), "--wait", "20"]).status(), "ok");
     assert_eq!(heavy_of(&e, &r.id()), 1, "后半段不占 CPU 也不改回");
-    assert_eq!(e.aq_log().lines().filter(|l| l.contains(&r.id()) && l.contains("改记重任务")).count(), 1);
+    assert_eq!(e.aq_log().lines().filter(|l| l.contains(&r.id()) && l.contains("now booked as heavy")).count(), 1);
 }
 
 // CASE-EST-10

@@ -17,6 +17,35 @@ pub fn support_dir() -> PathBuf {
 pub struct Env {
     pub dir: tempfile::TempDir,
     pub extra: std::cell::RefCell<Vec<(String, String)>>,
+    /// 测试自己传给 aq 的参数和目录：aq 原样回显它们不算违反「输出只用英文」（CASE-LANG-3）。
+    pub user_text: std::cell::RefCell<Vec<String>>,
+}
+
+/// 中日韩文字和全角标点。
+fn has_cjk(s: &str) -> bool {
+    s.chars().any(|c| matches!(c as u32, 0x3000..=0x303F | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xFF00..=0xFFEF))
+}
+
+/// 去掉用户自己写的内容后，输出里不能再有中文（CASE-LANG-1、CASE-LANG-2）。
+pub fn assert_english(what: &str, text: &str, user: &[String]) {
+    let mut t = text.to_string();
+    let mut user: Vec<&String> = user.iter().collect();
+    user.sort_by_key(|u| std::cmp::Reverse(u.len()));
+    for u in user {
+        if !u.is_empty() {
+            t = t.replace(u.as_str(), "");
+        }
+    }
+    let bad: Vec<&str> = t.lines().filter(|l| has_cjk(l)).collect();
+    assert!(bad.is_empty(), "{what} 不是英文：{bad:?}");
+}
+
+impl Drop for Env {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            assert_english("aq.log", &self.aq_log(), &self.user_text.borrow());
+        }
+    }
 }
 
 pub struct Res {
@@ -59,7 +88,7 @@ impl Env {
 
     pub fn with_config(cfg: &str) -> Env {
         let dir = tempfile::Builder::new().prefix("aqt").tempdir().expect("tempdir");
-        let e = Env { dir, extra: Default::default() };
+        let e = Env { dir, extra: Default::default(), user_text: Default::default() };
         for d in ["cfg/aq", "st", "sim", "emu/running", "browser/sessions", "ai", "work", "dev"] {
             std::fs::create_dir_all(e.path(d)).expect("mkdir");
         }
@@ -148,6 +177,7 @@ impl Env {
     }
 
     pub fn command(&self, args: &[&str]) -> Command {
+        self.note_user(&self.work(), args);
         let mut c = Command::new(AQ);
         c.args(args).current_dir(self.work());
         let bin = Path::new(AQ).parent().map(|p| p.display().to_string()).unwrap_or_default();
@@ -189,7 +219,21 @@ impl Env {
         let mut c = self.command(args);
         c.current_dir(cwd).stdin(Stdio::null());
         let out: Output = c.output().expect("运行 aq");
+        self.note_user(cwd, args);
+        let user = self.user_text.borrow().clone();
+        assert_english("stdout", &String::from_utf8_lossy(&out.stdout), &user);
+        assert_english("stderr", &String::from_utf8_lossy(&out.stderr), &user);
         parse(out)
+    }
+
+    /// 记下用户写的参数和目录（含 canonicalize 后的真实路径）。
+    pub fn note_user(&self, cwd: &Path, args: &[&str]) {
+        let mut u = self.user_text.borrow_mut();
+        u.extend(args.iter().map(|a| a.to_string()));
+        u.push(cwd.display().to_string());
+        if let Ok(p) = std::fs::canonicalize(cwd) {
+            u.push(p.display().to_string());
+        }
     }
 
     /// 后台跑一条 aq 命令（不等）。
@@ -199,12 +243,13 @@ impl Env {
         c.spawn().expect("spawn aq")
     }
 
-    /// 打开账本（等到 aq 建好库，最多 10 秒）。
+    /// 打开账本（等到 aq 建好库并迁移到最新版本，最多 10 秒；文件刚建出来时表可能还没建完）。
     pub fn db(&self) -> aq_store::Conn {
         let p = self.state().join("aq.db");
         until(10, || p.exists());
         let c = aq_store::Conn::open(&p).expect("open db");
         c.busy_timeout(Duration::from_secs(10)).expect("busy_timeout");
+        until(10, || c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).is_ok_and(|v| v == aq_store::SCHEMA_VERSION));
         c
     }
 

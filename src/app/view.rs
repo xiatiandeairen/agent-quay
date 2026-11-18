@@ -37,7 +37,7 @@ pub fn exec_json(ctx: &Ctx, e: &ExecRow, reused: Option<bool>, soonest_free_s: O
     }
     if e.status == ExecStatus::Rejected {
         m.insert("reason".into(), json!("unschedulable"));
-        m.insert("message".into(), json!("需求超过整机容量，永远不会被满足；见 aq status --human"));
+        m.insert("message".into(), json!("needs more than this machine has and will never start; see aq status --human"));
     }
     Value::Object(m)
 }
@@ -59,7 +59,7 @@ pub fn hold_json(h: &HoldRow, devices: &[(String, String)]) -> Value {
         }
         HoldStatus::Rejected => {
             m.insert("reason".into(), json!("device_error"));
-            m.insert("message".into(), json!("模拟器创建或启动失败；整组已回滚，可重新 hold"));
+            m.insert("message".into(), json!("creating or booting a device failed; the whole hold was rolled back, hold again"));
         }
         _ => {}
     }
@@ -74,20 +74,46 @@ pub struct PressureNote {
 
 /// 排队、等待中的对象加上 `waiting_for`：在等哪类资源（CASE-QUEUE-5、CASE-QUEUE-6、CASE-HOLD-12）。
 /// 在等内存压力回落时另加 `mem_pressure_s`（已持续多久）；超过上限再加 `message`，仍然排队、不失败。
-pub fn annotate_waiting(v: &mut Value, waiting: &std::collections::HashMap<String, Vec<aq_core::admit::Kind>>, p: &PressureNote) {
+pub fn annotate_waiting(v: &mut Value, adm: &aq_core::admit::AdmitResult, p: &PressureNote) {
     let pending = matches!(v["status"].as_str(), Some("queued" | "waiting"));
-    let Some(kinds) = v["id"].as_str().and_then(|id| waiting.get(id)) else { return };
+    let Some(id) = v["id"].as_str().map(String::from) else { return };
+    let Some(kinds) = adm.waiting_for.get(&id) else { return };
     if !pending || kinds.is_empty() {
         return;
     }
     v["waiting_for"] = json!(kinds.iter().map(|k| k.code()).collect::<Vec<_>>());
+    // 只因排头预留没放行：告诉调用方是谁挡的，不必去猜或读源码（CASE-QUEUE-3）
+    if let Some(head) = adm.blocked_by.get(&id) {
+        v["blocked_by"] = json!(head);
+    }
+    if let Some(g) = adm.disk_full.get(&id) {
+        v["message"] = json!(disk_full_message(g));
+        return;
+    }
     if let (true, Some(s)) = (kinds.contains(&aq_core::admit::Kind::MemPressure), p.for_s) {
         v["mem_pressure_s"] = json!(s);
         if s >= p.warn_after_s {
             v["message"] =
-                json!(format!("系统内存压力已持续 {} 分钟，压力来自 aq 以外的程序；仍在排队，关掉占内存的程序后会自动开始", s / 60));
+                json!(format!("System memory pressure has lasted {} minutes and comes from programs outside aq. Still queued; starts automatically once memory-heavy programs are closed.", s / 60));
         }
     }
+}
+
+/// 磁盘等不到时给 agent 转告用户的话（CASE-QUEUE-8）。
+pub fn disk_full_message(g: &aq_core::admit::DiskGap) -> String {
+    format!(
+        "Needs {} GB more disk to start: {} GB free, {} GB kept in reserve, this task is estimated to write {} GB. \
+         Running tasks finishing will not free enough; someone has to free up disk space. Still queued; starts automatically once space is available.",
+        gb(g.short_mb()),
+        gb(g.free_mb),
+        gb(g.floor_mb),
+        gb(g.need_mb)
+    )
+}
+
+/// MB → 一位小数的 GB。
+pub fn gb(mb: i64) -> String {
+    format!("{:.1}", mb as f64 / 1024.0)
 }
 
 pub fn rejected(reason: &str, message: &str) -> Value {

@@ -31,7 +31,7 @@ aq 按「代码指纹 + 执行目录 + 命令原文」判断是不是同一次�
 
 这一步结束的标准：每个 id 都拿到终态（ok / failed / timeout / interrupted / cancelled / rejected）。还在 queued、running 时不下结论。
 
-`reused: true` 表示别人正在跑同一份代码的同一条命令，你共用它的结果；需要单独跑时加 `--fresh`。不要的任务用 `aq cancel <id>`。
+`reused: true` 表示别人正在跑同一份代码的同一条命令，你共用它的结果；需要单独跑时加 `--fresh`。不要的任务用 `aq cancel <id>`：运行中的会等到进程组结束再返回 `cancelled`（最多十几秒）；返回 `running` 且带 `cancel_requested: true` 时，稍后用 `aq status <id>` 读回终态。
 
 ## 借设备和账号
 
@@ -53,6 +53,8 @@ aq 按「代码指纹 + 执行目录 + 命令原文」判断是不是同一次�
 
 | 情况 | 怎么办 |
 | --- | --- |
+| `waiting_for` 含 `disk_full` | 磁盘不够，等运行中的任务结束也腾不出来。把 `message` 转告用户（还差多少 GB、需要清理磁盘）；不想等就 `aq cancel <id>`。不要绕过 aq 直接跑 |
+| 带 `blocked_by` | 你要的资源被排头 `<id>` 预留着，排头开始后你就会跟着放行；想知道排头在等什么用 `aq status <排头id>` |
 | `rejected` + `usage` | 写法不对（缺 `--`、设备类型拼错、id 不存在），改调用 |
 | `rejected` + `unschedulable` | 需求超过整机容量，或真机比登记的多，永远等不到；告诉用户 |
 | `rejected` + `device_unavailable` | 登记过的真机此刻连不上：把 `unavailable[].name` 和 `why` 告诉用户，请用户连上后再借 |

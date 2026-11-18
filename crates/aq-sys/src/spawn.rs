@@ -14,7 +14,7 @@ pub fn detach(exe: &Path, args: &[String], keep_fd: Option<RawFd>, stderr_log: &
         .create(true)
         .append(true)
         .open(stderr_log)
-        .map_err(|e| format!("打开 {} 失败：{e}", stderr_log.display()))?;
+        .map_err(|e| format!("cannot open {}: {e}", stderr_log.display()))?;
     let mut cmd = Command::new(exe);
     cmd.arg("__detach").args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(err);
     if let Some(fd) = keep_fd {
@@ -28,8 +28,8 @@ pub fn detach(exe: &Path, args: &[String], keep_fd: Option<RawFd>, stderr_log: &
             Ok(())
         });
     }
-    let mut child = cmd.spawn().map_err(|e| format!("拉起后台执行者失败：{e}"))?;
-    child.wait().map_err(|e| format!("等待中间进程失败：{e}"))?;
+    let mut child = cmd.spawn().map_err(|e| format!("cannot start the background runner: {e}"))?;
+    child.wait().map_err(|e| format!("waiting for the intermediate process failed: {e}"))?;
     Ok(())
 }
 
@@ -45,7 +45,7 @@ fn close_inherited(keep: Option<RawFd>) {
 
 /// 中间进程：拉起目标并退出（不等它）。
 pub fn detach_child(exe: &Path, args: &[String]) -> Result<(), String> {
-    Command::new(exe).args(args).spawn().map(|_| ()).map_err(|e| format!("拉起失败：{e}"))
+    Command::new(exe).args(args).spawn().map(|_| ()).map_err(|e| format!("cannot start: {e}"))
 }
 
 /// 启动闸门：命令进程（经 `aq __exec`）自成进程组，阻塞读管道；runner 写入 running 并提交后再放行。
@@ -69,20 +69,25 @@ pub struct Launch<'a> {
     pub cwd: &'a Path,
     pub log: &'a Path,
     pub env: &'a [(&'a str, String)],
+    /// 命令的 CPU 优先级（nice 值，0～20，0 不降）。机器忙时让用户手上的 App 先拿到 CPU（CASE-PROT-1）。
+    pub nice: i32,
 }
 
 pub fn spawn_gated(l: &Launch<'_>) -> Result<Gate, String> {
     let mut fds = [0 as RawFd; 2];
     // SAFETY: fds 有两个元素可写。
     if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
-        return Err("建管道失败".into());
+        return Err("cannot create a pipe".into());
     }
     let (r, w) = (fds[0], fds[1]);
     crate::lock::set_cloexec(w, true)?;
     // SAFETY: w 是刚创建的管道写端，由 File 独占。
     let write = unsafe { File::from_raw_fd(w) };
-    let log =
-        std::fs::OpenOptions::new().create(true).append(true).open(l.log).map_err(|e| format!("打开日志 {} 失败：{e}", l.log.display()))?;
+    let log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(l.log)
+        .map_err(|e| format!("cannot open log {}: {e}", l.log.display()))?;
     let log2 = log.try_clone().map_err(|e| e.to_string())?;
     let mut cmd = Command::new(l.exe);
     cmd.arg("__exec").arg(r.to_string()).arg("--").args(l.argv);
@@ -90,7 +95,17 @@ pub fn spawn_gated(l: &Launch<'_>) -> Result<Gate, String> {
     for (k, v) in l.env {
         cmd.env(k, v);
     }
-    let child = cmd.spawn().map_err(|e| format!("启动命令失败：{e}"));
+    if l.nice > 0 {
+        let nice = l.nice;
+        // SAFETY: pre_exec 里只调用 async-signal-safe 的 setpriority；之后 exec 的命令及其子进程继承这个优先级。
+        unsafe {
+            cmd.pre_exec(move || {
+                libc::setpriority(libc::PRIO_PROCESS, 0, nice);
+                Ok(())
+            });
+        }
+    }
+    let child = cmd.spawn().map_err(|e| format!("cannot start the command: {e}"));
     // SAFETY: r 是管道读端，子进程已继承，父进程关掉自己这份。
     unsafe { libc::close(r) };
     Ok(Gate { child: child?, write: Some(write) })
@@ -112,7 +127,7 @@ impl Gate {
             return Ok(None);
         }
         if r < 0 {
-            return Err(format!("等待命令进程 {pid} 失败：{}", std::io::Error::last_os_error()));
+            return Err(format!("waiting for command process {pid} failed: {}", std::io::Error::last_os_error()));
         }
         let secs = |t: libc::timeval| t.tv_sec as f64 + t.tv_usec as f64 / 1e6;
         Ok(Some(Exit {
@@ -123,8 +138,8 @@ impl Gate {
     }
     /// 放行：写 1 个字节。
     pub fn open(&mut self) -> Result<(), String> {
-        let mut w = self.write.take().ok_or("闸门已打开")?;
-        w.write_all(b"1").map_err(|e| format!("放行失败：{e}"))
+        let mut w = self.write.take().ok_or("gate already open")?;
+        w.write_all(b"1").map_err(|e| format!("cannot open the gate: {e}"))
     }
 }
 
@@ -140,7 +155,7 @@ pub fn exec_after_gate(fd: RawFd, argv: &[String]) -> i32 {
     }
     let Some((prog, args)) = argv.split_first() else { return 127 };
     let err = Command::new(prog).args(args).exec();
-    eprintln!("aq: 无法执行 {prog}：{err}");
+    eprintln!("aq: cannot execute {prog}: {err}");
     if err.kind() == std::io::ErrorKind::PermissionDenied {
         126
     } else {

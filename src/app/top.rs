@@ -99,6 +99,7 @@ fn kind_en(k: &Kind) -> String {
         Kind::ColdStart => "previous simulator boot".into(),
         Kind::SimSlots => "simulator limit".into(),
         Kind::Disk => "disk".into(),
+        Kind::DiskFull => "disk (needs cleanup)".into(),
         Kind::Net => "download slot".into(),
         Kind::Device(t) => t.to_string(),
         Kind::Account(a) => format!("account {a}"),

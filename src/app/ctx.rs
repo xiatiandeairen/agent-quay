@@ -91,7 +91,7 @@ impl Ctx {
         dirs.ensure().map_err(AppError::Fatal)?;
         let store = Store::open(&dirs.db).map_err(AppError::from)?;
         let (tuning, limits) = Tuning::from_env();
-        let exe = std::env::current_exe().map_err(|e| AppError::Fatal(format!("找不到 aq 可执行文件：{e}")))?;
+        let exe = std::env::current_exe().map_err(|e| AppError::Fatal(format!("cannot find the aq executable: {e}")))?;
         let canon = std::fs::canonicalize(&dirs.state).unwrap_or_else(|_| dirs.state.clone());
         let ledger = aq_core::devname::ledger_tag(&canon.to_string_lossy());
         let default_ledger = dirs.is_default_state();
@@ -149,7 +149,10 @@ impl Ctx {
     }
 
     pub fn emu(&self) -> aq_sys::emu::Emulator {
-        aq_sys::emu::Emulator::from_env(&self.config.android_avd, &self.dirs.state.join("emu"))
+        aq_sys::emu::Emulator {
+            nice: self.config.nice,
+            ..aq_sys::emu::Emulator::from_env(&self.config.android_avd, &self.dirs.state.join("emu"))
+        }
     }
 
     /// 虚拟设备的后端：ios-sim → simctl，android-emu → emulator，browser → agent-browser，desktop → agent-desktop 会话名。
@@ -159,7 +162,7 @@ impl Ctx {
         match t {
             DeviceType::IosSim => Some(Box::new(self.sim())),
             DeviceType::AndroidEmu => Some(Box::new(self.emu())),
-            DeviceType::Browser => Some(Box::new(aq_sys::browser::AgentBrowser::from_env())),
+            DeviceType::Browser => Some(Box::new(aq_sys::browser::AgentBrowser::from_env(self.config.nice))),
             DeviceType::Desktop => Some(Box::new(aq_sys::desktop::AgentDesktop)),
             DeviceType::IosDevice | DeviceType::AndroidDevice => None,
         }

@@ -6,6 +6,8 @@
 #   --other-group     忙循环子进程另开进程组（像 xcodebuild 的 SWBBuildService）
 #   --burst N         不断起停 1 秒的短命子进程，同时约 N 个（模拟 xcodebuild 起停 clang）
 #   --kids N --kid-mem SIZE  起 N 个只占内存不占 CPU 的子进程（配 --other-group 时另开进程组）
+#   --disk-mb N       开始时把 $AQ_SYS_OVERRIDE 里的剩余磁盘减 N MB（模拟写磁盘；负数表示删文件）
+#   --disk-from FILE  写多少 MB 从文件读（命令文本不变 → 命令签名不变）
 import argparse, os, subprocess, sys, time
 p = argparse.ArgumentParser()
 p.add_argument("--mem", default="0M"); p.add_argument("--cpu", type=int, default=0)
@@ -14,7 +16,17 @@ p.add_argument("--cpu-from"); p.add_argument("--cpu-secs", type=float); p.add_ar
 p.add_argument("--other-group", action="store_true")
 p.add_argument("--kids", type=int, default=0); p.add_argument("--kid-mem", default="0M")
 p.add_argument("--count"); p.add_argument("--out", type=int, default=0); p.add_argument("--touch")
+p.add_argument("--disk-mb", type=int, default=0); p.add_argument("--disk-from")
 a = p.parse_args()
+if a.disk_from:
+    a.disk_mb = int(open(a.disk_from).read().strip() or 0)
+if a.disk_mb:
+    import fcntl, json
+    path = os.environ["AQ_SYS_OVERRIDE"]
+    with open(path + ".lock", "w") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        v = json.load(open(path)); v["disk_free_mb"] -= a.disk_mb
+        open(path + ".tmp", "w").write(json.dumps(v)); os.replace(path + ".tmp", path)
 if a.count:
     with open(a.count, "a") as f: f.write(f"{os.getpid()}\n")
 def size(v): return int(float(v[:-1]) * (1024**3 if v[-1].upper() == "G" else 1024**2))

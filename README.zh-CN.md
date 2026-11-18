@@ -77,6 +77,7 @@ heavy_slots = 2          # 同时最多几个重任务
 mem = "28G"              # aq 可分配的内存；不写时取物理内存的 3/4
 sim_slots = 4            # iOS 模拟器加 Android 实例最多几台；不写时每 8G 内存一台
 disk_floor = "50G"       # 磁盘至少保留这么多
+nice = 10                # aq 启动的进程的 CPU 优先级（0～20，0 不降）
 ai_cli = "auto"          # 或写死一条命令，如 "claude -p"
 
 [ios-sim]

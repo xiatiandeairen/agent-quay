@@ -49,7 +49,8 @@ impl SimCtl {
         struct List {
             runtimes: Vec<Rt>,
         }
-        let l: List = serde_json::from_str(&self.call(&["list", "runtimes", "-j"], 60)?).map_err(|e| format!("解析运行时列表失败：{e}"))?;
+        let l: List = serde_json::from_str(&self.call(&["list", "runtimes", "-j"], 60)?)
+            .map_err(|e| format!("cannot parse the runtime list: {e}"))?;
         let key = |v: &str| v.split('.').map(|p| p.parse::<u32>().unwrap_or(0)).collect::<Vec<_>>();
         l.runtimes
             .into_iter()
@@ -57,7 +58,7 @@ impl SimCtl {
             .filter(|r| r.supported.is_empty() || r.supported.iter().any(|d| d.name == self.model))
             .max_by_key(|r| (key(&r.version), r.supported.len()))
             .map(|r| r.identifier)
-            .ok_or_else(|| format!("本机没有支持 {} 的 iOS 运行时", self.model))
+            .ok_or_else(|| format!("no iOS runtime on this Mac supports {}", self.model))
     }
 }
 
@@ -77,7 +78,7 @@ impl Simulator for SimCtl {
         let rt = self.latest_ios_runtime()?;
         let udid = self.call(&["create", name, &self.model, &rt], 120)?.trim().to_string();
         if udid.is_empty() {
-            return Err("simctl create 没有返回 UDID".into());
+            return Err("simctl create returned no UDID".into());
         }
         let booted = self.call(&["boot", &udid], 180).and_then(|_| self.call(&["bootstatus", &udid, "-b"], 300));
         if let Err(e) = booted {
@@ -104,7 +105,8 @@ impl Simulator for SimCtl {
         struct List {
             devices: std::collections::HashMap<String, Vec<Dev>>,
         }
-        let l: List = serde_json::from_str(&self.call(&["list", "devices", "-j"], 60)?).map_err(|e| format!("解析设备列表失败：{e}"))?;
+        let l: List =
+            serde_json::from_str(&self.call(&["list", "devices", "-j"], 60)?).map_err(|e| format!("cannot parse the device list: {e}"))?;
         Ok(l.devices.into_values().flatten().filter(|d| d.name.starts_with("aq-")).map(|d| (d.name, d.udid)).collect())
     }
 }

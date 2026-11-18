@@ -128,3 +128,32 @@ fn ai_output_validation() {
         .unwrap();
     assert_eq!((tiny.res.mem_mb, tiny.est_s), (256, 1), "低于下限抬到下限");
 }
+
+fn d(mb: i64, reliable: bool) -> DiskSample {
+    DiskSample { delta_mb: mb, reliable }
+}
+
+// CASE-EST-17
+#[test]
+fn disk_uses_only_reliable_samples() {
+    // 最新在前：不可靠的 8G、可靠的 300MB、不可靠的 9G、可靠的 200MB → 只看 300、200
+    let v = [d(8192, false), d(300, true), d(9216, false), d(200, true)];
+    let want = upper_of(&[300.0, 200.0]);
+    assert_eq!(disk_upper(&v), Some(want));
+    assert!(want < 400, "可靠实测 300、200 的估值 {want}");
+}
+
+// CASE-EST-17
+#[test]
+fn disk_without_reliable_takes_min() {
+    let v = [d(3072, false), d(8192, false), d(5120, false)];
+    assert_eq!(disk_upper(&v), Some(3072), "只有不可靠实测时取最小值");
+    assert_eq!(disk_upper(&[d(-500, false)]), Some(0), "负数（删了文件）截成 0");
+    assert_eq!(disk_upper(&[]), None);
+}
+
+// CASE-EST-17
+#[test]
+fn disk_single_reliable_times_1_2() {
+    assert_eq!(disk_upper(&[d(1000, true), d(9000, false)]), Some(1200));
+}

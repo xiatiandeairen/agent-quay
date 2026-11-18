@@ -162,7 +162,7 @@ fn background(by: &'static str, f: impl FnOnce(&Ctx, &mut aq_store::Store) -> Ap
     match f(&ctx, &mut store) {
         Ok(()) => 0,
         Err(e) => {
-            ctx.log_note("", &format!("{by} 出错：{}", e.to_json()));
+            ctx.log_note("", &format!("{by} failed: {}", e.to_json()));
             eprintln!("aq {by}: {}", e.to_json());
             1
         }
@@ -178,8 +178,8 @@ fn main() {
         }
         Err(e) => {
             let msg = e.render().to_string();
-            let first = msg.lines().next().unwrap_or("参数错误").trim_start_matches("error: ").to_string();
-            println!("{}", app::view::rejected("usage", &format!("{first}；写法见 aq --help")));
+            let first = msg.lines().next().unwrap_or("invalid arguments").trim_start_matches("error: ").to_string();
+            println!("{}", app::view::rejected("usage", &format!("{first}; see aq --help")));
             std::process::exit(3);
         }
     };

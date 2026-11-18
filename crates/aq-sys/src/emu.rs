@@ -20,6 +20,8 @@ pub struct Emulator {
     pub avd: String,
     pub dir: PathBuf,
     pub boot_timeout: Duration,
+    /// 模拟器进程的 nice 值（0 不降，CASE-PROT-3）。
+    pub nice: i32,
 }
 
 pub(crate) fn sdk_tool(rel: &str) -> String {
@@ -39,6 +41,7 @@ impl Emulator {
             avd: avd.to_string(),
             dir: dir.to_path_buf(),
             boot_timeout: Duration::from_secs(boot),
+            nice: 0,
         }
     }
 
@@ -47,7 +50,7 @@ impl Emulator {
         argv.extend(args.iter().map(|s| s.to_string()));
         let o = run(&Call { argv: &argv, cwd: None, env: &[], stdin: None, timeout: Duration::from_secs(secs) })?;
         if o.status != 0 {
-            return Err(format!("adb {} 退出码 {}：{}", args.join(" "), o.status, o.stderr.trim()));
+            return Err(format!("adb {} exited with {}: {}", args.join(" "), o.status, o.stderr.trim()));
         }
         Ok(String::from_utf8_lossy(&o.stdout).into_owned())
     }
@@ -68,7 +71,7 @@ impl Emulator {
 
     /// 挑一个空闲端口并拿住它的锁（创建期间一直拿着，防止并发的借用挑到同一个）。
     fn reserve_port(&self) -> Result<(u16, std::fs::File), String> {
-        std::fs::create_dir_all(&self.dir).map_err(|e| format!("建目录 {} 失败：{e}", self.dir.display()))?;
+        std::fs::create_dir_all(&self.dir).map_err(|e| format!("cannot create {}: {e}", self.dir.display()))?;
         let busy = self.running_ports()?;
         for p in (PORT_FIRST..=PORT_LAST).step_by(2) {
             if busy.contains(&p) {
@@ -78,7 +81,7 @@ impl Emulator {
                 return Ok((p, lock));
             }
         }
-        Err("aq 的模拟器端口 5600–5680 已用完".into())
+        Err("aq emulator ports 5600-5680 are all in use".into())
     }
 
     fn boot_done(&self, serial: &str) -> bool {
@@ -89,14 +92,14 @@ impl Emulator {
         let deadline = Instant::now() + self.boot_timeout;
         while Instant::now() < deadline {
             if let Ok(Some(st)) = child.try_wait() {
-                return Err(format!("emulator 启动后退出（{st}）：{}", self.last_error(serial)));
+                return Err(format!("emulator exited after start ({st}): {}", self.last_error(serial)));
             }
             if self.boot_done(serial) {
                 return Ok(());
             }
             std::thread::sleep(Duration::from_millis(500));
         }
-        Err(format!("模拟器 {serial} 超过 {} 秒未启动完成", self.boot_timeout.as_secs()))
+        Err(format!("emulator {serial} did not finish booting within {}s", self.boot_timeout.as_secs()))
     }
 
     /// emulator 日志里最后一行 ERROR。常见：该 AVD 正被不带 -read-only 的模拟器使用（要给 aq 配专用 AVD）、AVD 不存在。
@@ -104,24 +107,34 @@ impl Emulator {
         let port = serial.trim_start_matches("emulator-");
         let log = self.dir.join(format!("{port}.log"));
         let text = std::fs::read_to_string(&log).unwrap_or_default();
-        let line = text.lines().rev().find(|l| l.contains("ERROR") || l.contains("PANIC")).unwrap_or("没有错误行").trim();
+        let line = text.lines().rev().find(|l| l.contains("ERROR") || l.contains("PANIC")).unwrap_or("no error line").trim();
         let hint = if line.contains("Another emulator instance is running") {
-            "；这个 AVD 正被不带 -read-only 的模拟器使用，请在 config.toml 的 [android-emu] 配一个 aq 专用的 AVD"
+            "; this AVD is used by an emulator started without -read-only; set an AVD only aq uses under [android-emu] in config.toml"
         } else {
             ""
         };
-        format!("{line}{hint}（日志 {}）", log.display())
+        format!("{line}{hint} (log {})", log.display())
     }
 
     fn launch(&self, port: u16) -> Result<std::process::Child, String> {
         let log = std::fs::File::create(self.dir.join(format!("{port}.log"))).map_err(|e| e.to_string())?;
         let log2 = log.try_clone().map_err(|e| e.to_string())?;
-        let (prog, pre) = self.emulator.split_first().ok_or("没有配置 emulator")?;
+        let (prog, pre) = self.emulator.split_first().ok_or("no emulator configured")?;
         let mut cmd = Command::new(prog);
         cmd.args(pre).args(["-avd", &self.avd, "-read-only", "-no-window", "-no-audio", "-no-boot-anim", "-no-snapshot"]);
         cmd.args(["-port", &port.to_string()]).stdin(Stdio::null()).stdout(log).stderr(log2);
         std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
-        cmd.spawn().map_err(|e| format!("无法启动 emulator：{e}"))
+        if self.nice > 0 {
+            let nice = self.nice;
+            // SAFETY: pre_exec 里只调用 async-signal-safe 的 setpriority。
+            unsafe {
+                std::os::unix::process::CommandExt::pre_exec(&mut cmd, move || {
+                    libc::setpriority(libc::PRIO_PROCESS, 0, nice);
+                    Ok(())
+                });
+            }
+        }
+        cmd.spawn().map_err(|e| format!("cannot start emulator: {e}"))
     }
 }
 
@@ -142,7 +155,7 @@ impl Simulator for Emulator {
     }
 
     fn delete(&self, id: &str) -> Result<(), String> {
-        let port: u16 = id.strip_prefix("emulator-").and_then(|p| p.parse().ok()).ok_or_else(|| format!("不是模拟器 id：{id}"))?;
+        let port: u16 = id.strip_prefix("emulator-").and_then(|p| p.parse().ok()).ok_or_else(|| format!("not an emulator id: {id}"))?;
         if !self.running_ports()?.contains(&port) {
             let _ = std::fs::remove_file(self.name_file(port)); // 已经不在，清掉名字
             return Err(format!("no such device: {id}"));

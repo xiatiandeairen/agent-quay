@@ -5,6 +5,9 @@ use std::path::Path;
 use aq_core::capacity::Capacity;
 use serde::Deserialize;
 
+/// 默认把 aq 启动的进程降到 nice 10：机器空闲时不变慢，忙时让用户手上的 App 先拿到 CPU。
+pub const DEFAULT_NICE: i64 = 10;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub cap: Capacity,
@@ -12,6 +15,8 @@ pub struct Config {
     pub ai_cli: String,
     pub ios_sim_model: String,
     pub android_avd: String,
+    /// aq 启动的命令、Android 模拟器、浏览器会话的 nice 值：0～20，默认 10，0 不降（CASE-PROT-1～3）。
+    pub nice: i32,
 }
 
 #[derive(Deserialize, Default)]
@@ -23,6 +28,7 @@ struct Raw {
     net_slots: Option<i64>,
     sim_slots: Option<i64>,
     ai_cli: Option<String>,
+    nice: Option<i64>,
     #[serde(rename = "ios-sim")]
     ios_sim: Option<Sim>,
     #[serde(rename = "android-emu")]
@@ -64,12 +70,12 @@ struct Ids {
 pub fn parse_size_mb(s: &str) -> Result<i64, String> {
     let t = s.trim();
     let (num, unit) = t.split_at(t.find(|c: char| !c.is_ascii_digit() && c != '.').unwrap_or(t.len()));
-    let n: f64 = num.parse().map_err(|_| format!("大小写法不对：{s}（应为 28G、512M 这样）"))?;
+    let n: f64 = num.parse().map_err(|_| format!("bad size: {s} (write it like 28G or 512M)"))?;
     let mb = match unit.trim().to_ascii_uppercase().as_str() {
         "G" | "GB" => n * 1024.0,
         "M" | "MB" => n,
         "T" | "TB" => n * 1024.0 * 1024.0,
-        _ => return Err(format!("大小单位不认识：{s}（用 G 或 M）")),
+        _ => return Err(format!("unknown size unit: {s} (use G or M)")),
     };
     Ok(mb.round() as i64)
 }
@@ -87,9 +93,9 @@ impl Config {
         let text = match std::fs::read_to_string(path) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-            Err(e) => return Err(format!("读取 {} 失败：{e}", path.display())),
+            Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
         };
-        Self::parse_for(&text, physical_mb).map_err(|e| format!("{}：{e}", path.display()))
+        Self::parse_for(&text, physical_mb).map_err(|e| format!("{}: {e}", path.display()))
     }
 
     /// 物理内存未知（0）时容量退回内置默认值。
@@ -111,13 +117,18 @@ impl Config {
             android_devices: raw.android_device.map(|i| i.ids).unwrap_or_default(),
         };
         if cap.heavy_slots < 0 || cap.net_slots < 0 || cap.sim_slots < 0 {
-            return Err("heavy_slots、net_slots、sim_slots 不能为负数".into());
+            return Err("heavy_slots, net_slots and sim_slots cannot be negative".into());
+        }
+        let nice = raw.nice.unwrap_or(DEFAULT_NICE);
+        if !(0..=20).contains(&nice) {
+            return Err(format!("nice must be between 0 and 20 (got {nice}); 0 turns it off"));
         }
         Ok(Config {
             cap,
             ai_cli: raw.ai_cli.unwrap_or_else(|| "auto".into()),
             ios_sim_model: sim_model.unwrap_or_else(|| "iPhone 17 Pro".into()),
             android_avd: avd.unwrap_or_else(|| "Pixel_8_API_35".into()),
+            nice: nice as i32,
         })
     }
 }

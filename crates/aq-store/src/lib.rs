@@ -24,11 +24,11 @@ pub use rusqlite::ToSql;
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     /// 等写锁超过 5 秒：reason=busy，退出码 1，数据未改。
-    #[error("数据库忙：等写锁超过 5 秒")]
+    #[error("database busy: waited over 5s for the write lock")]
     Busy,
-    #[error("数据库错误：{0}")]
+    #[error("database error: {0}")]
     Sql(String),
-    #[error("数据损坏：{0}")]
+    #[error("database corrupt: {0}")]
     Corrupt(String),
 }
 
@@ -43,7 +43,11 @@ impl From<rusqlite::Error> for StoreError {
 
 pub type Result<T> = std::result::Result<T, StoreError>;
 
-const MIGRATION_SQL: &[&str] = &[include_str!("../migrations/0001_init.sql"), include_str!("../migrations/0002_browser_desktop.sql")];
+const MIGRATION_SQL: &[&str] = &[
+    include_str!("../migrations/0001_init.sql"),
+    include_str!("../migrations/0002_browser_desktop.sql"),
+    include_str!("../migrations/0003_disk_samples.sql"),
+];
 
 fn migrations() -> Migrations<'static> {
     Migrations::new(MIGRATION_SQL.iter().map(|s| M::up(s)).collect())
@@ -69,11 +73,11 @@ impl Store {
                 .truncate(false)
                 .write(true)
                 .open(path.with_extension("db.migrate.lock"))
-                .map_err(|e| StoreError::Sql(format!("打开迁移锁失败：{e}")))?;
-            lock.lock().map_err(|e| StoreError::Sql(format!("迁移加锁失败：{e}")))?;
+                .map_err(|e| StoreError::Sql(format!("cannot open the migration lock: {e}")))?;
+            lock.lock().map_err(|e| StoreError::Sql(format!("cannot take the migration lock: {e}")))?;
             let mode: String = conn.query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0))?;
             if !mode.eq_ignore_ascii_case("wal") {
-                return Err(StoreError::Sql(format!("journal_mode 设置失败：{mode}")));
+                return Err(StoreError::Sql(format!("cannot set journal_mode: {mode}")));
             }
             Self::migrate(&mut conn)?;
         }
@@ -94,7 +98,7 @@ impl Store {
             return Ok(());
         }
         if v > SCHEMA_VERSION {
-            return Err(StoreError::Corrupt(format!("数据库版本 {v} 比本程序支持的 {SCHEMA_VERSION} 新")));
+            return Err(StoreError::Corrupt(format!("database version {v} is newer than {SCHEMA_VERSION}, the newest this aq supports")));
         }
         migrations().to_latest(conn).map_err(|e| match e {
             rusqlite_migration::Error::RusqliteError { err, .. } => StoreError::from(err),
@@ -122,8 +126,10 @@ pub fn schema_dump(conn: &Connection) -> Result<Vec<String>> {
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
-pub use exec::{active_execs, find_inflight, get_exec, history, machine_history, measured_before};
-pub use exec::{cancel_queued, finish, insert_exec, interrupt, mark_heavy, mark_running, reject_exec, request_cancel, set_estimate};
+pub use exec::{active_execs, disk_samples, disk_shared, find_inflight, get_exec, history, machine_history, measured_before};
+pub use exec::{
+    cancel_queued, cancel_running, finish, insert_exec, interrupt, mark_heavy, mark_running, reject_exec, request_cancel, set_estimate,
+};
 pub use hold::{accounts, active_holds, allocate, clear_allocation, devices, end_hold, get_hold, insert_hold, mark_held, set_device};
 pub use hold::{delete_device_row, orphan_sim_rows, reject_hold};
 pub use profile::{get_profile, put_profile};

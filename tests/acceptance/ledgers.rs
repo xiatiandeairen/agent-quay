@@ -78,5 +78,5 @@ fn held_device_deleted_outside_aq_is_reported_missing() {
     let s = e.aq(&["status", &h.id()]);
     assert_eq!(s.status(), "held", "状态不变，由调用方决定归还重借");
     assert_eq!(s.one()["missing"], serde_json::json!([udid]), "{}", s.stdout);
-    assert!(e.aq_log().contains("借出的设备已不在"));
+    assert!(e.aq_log().contains("held devices are gone"));
 }

@@ -1,6 +1,6 @@
 //! executions 表的读写。每个改状态的函数都带上原状态条件，状态倒退由这里保证（DB 不拦，见 DB 用例约定）。
 
-use aq_core::estimate::{MachineHistory, Sample};
+use aq_core::estimate::{DiskSample, MachineHistory, Sample};
 use aq_core::model::{ExecStatus, Resources};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
@@ -28,10 +28,12 @@ pub struct ExecRow {
     pub peak_mem_mb: Option<i64>,
     pub cpu_avg_cores: Option<f64>,
     pub disk_delta_mb: Option<i64>,
+    /// 提交时执行目录所在的 worktree 根（不在仓库里为空）。
+    pub worktree: Option<String>,
 }
 
 const COLS: &str = "id, hash, status, cwd, argv, profile_key, fingerprint, content_changed, heavy, mem_mb, disk_mb, uses_net, \
-timeout_s, submitted_at, started_at, finished_at, pgid, pgid_started_at, cancel_requested, exit_code, peak_mem_mb, cpu_avg_cores, disk_delta_mb";
+timeout_s, submitted_at, started_at, finished_at, pgid, pgid_started_at, cancel_requested, exit_code, peak_mem_mb, cpu_avg_cores, disk_delta_mb, worktree";
 
 fn bad(what: &str, v: &str) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, format!("{what}: {v}").into())
@@ -66,6 +68,7 @@ fn from_row(r: &Row<'_>) -> rusqlite::Result<ExecRow> {
         peak_mem_mb: r.get(20)?,
         cpu_avg_cores: r.get(21)?,
         disk_delta_mb: r.get(22)?,
+        worktree: r.get(23)?,
     })
 }
 
@@ -76,14 +79,15 @@ pub struct NewExec<'a> {
     pub argv: &'a [String],
     pub profile_key: &'a str,
     pub fingerprint: Option<&'a str>,
+    pub worktree: Option<&'a str>,
     pub submitted_at: i64,
 }
 
 pub fn insert_exec(c: &Connection, n: &NewExec<'_>) -> Result<()> {
     let argv = serde_json::to_string(n.argv).map_err(|e| StoreError::Sql(e.to_string()))?;
     c.execute(
-        "INSERT INTO executions (id, hash, status, cwd, argv, profile_key, fingerprint, submitted_at) VALUES (?1, ?2, 'queued', ?3, ?4, ?5, ?6, ?7)",
-        params![n.id, n.hash, n.cwd, argv, n.profile_key, n.fingerprint, n.submitted_at],
+        "INSERT INTO executions (id, hash, status, cwd, argv, profile_key, fingerprint, worktree, submitted_at) VALUES (?1, ?2, 'queued', ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![n.id, n.hash, n.cwd, argv, n.profile_key, n.fingerprint, n.worktree, n.submitted_at],
     )?;
     Ok(())
 }
@@ -117,7 +121,7 @@ pub fn active_execs(c: &Connection) -> Result<Vec<ExecRow>> {
 
 fn changed(n: usize, id: &str, what: &str) -> Result<bool> {
     if n > 1 {
-        return Err(StoreError::Corrupt(format!("{what} 改到了 {n} 行：{id}")));
+        return Err(StoreError::Corrupt(format!("{what} changed {n} rows: {id}")));
     }
     Ok(n == 1)
 }
@@ -152,15 +156,27 @@ pub struct Finish {
     pub peak_mem_mb: i64,
     pub cpu_avg_cores: f64,
     pub disk_delta_mb: i64,
+    /// 运行期间没有别的磁盘写入来源（别的执行、aq 建删模拟器）。
+    pub disk_reliable: bool,
     pub content_changed: bool,
 }
 
 /// 结束：一条 UPDATE 写完所有终态字段（CASE-STORE-1、CASE-STORE-1）。
 pub fn finish(c: &Connection, id: &str, f: &Finish) -> Result<bool> {
     let n = c.execute(
-        "UPDATE executions SET status = ?2, finished_at = ?3, exit_code = ?4, peak_mem_mb = ?5, cpu_avg_cores = ?6, disk_delta_mb = ?7, content_changed = ?8 \
-         WHERE id = ?1 AND status = 'running'",
-        params![id, f.status.as_str(), f.finished_at, f.exit_code, f.peak_mem_mb, f.cpu_avg_cores, f.disk_delta_mb, f.content_changed as i64],
+        "UPDATE executions SET status = ?2, finished_at = ?3, exit_code = ?4, peak_mem_mb = ?5, cpu_avg_cores = ?6, disk_delta_mb = ?7, content_changed = ?8, \
+         disk_reliable = ?9 WHERE id = ?1 AND status = 'running'",
+        params![
+            id,
+            f.status.as_str(),
+            f.finished_at,
+            f.exit_code,
+            f.peak_mem_mb,
+            f.cpu_avg_cores,
+            f.disk_delta_mb,
+            f.content_changed as i64,
+            f.disk_reliable as i64
+        ],
     )?;
     changed(n, id, "finish")
 }
@@ -179,6 +195,11 @@ pub fn cancel_queued(c: &Connection, id: &str, now: i64) -> Result<bool> {
 
 pub fn reject_exec(c: &Connection, id: &str, now: i64) -> Result<bool> {
     end_from(c, id, "queued", ExecStatus::Rejected, now)
+}
+
+/// runner 已不在时由 aq cancel 自己终止进程组后写入（CASE-CANCEL-10）。
+pub fn cancel_running(c: &Connection, id: &str, now: i64) -> Result<bool> {
+    end_from(c, id, "running", ExecStatus::Cancelled, now)
 }
 
 pub fn interrupt(c: &Connection, id: &str, now: i64) -> Result<bool> {
@@ -212,6 +233,49 @@ pub fn history(c: &Connection, profile_key: &str) -> Result<Vec<Sample>> {
     )?;
     let rows = q.query_map([profile_key], sample)?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// 估磁盘用的实测，最新在前，最多 20 条（CASE-EST-16、CASE-EST-17）。
+/// 这个 worktree 已有成功执行、且之后还有实测：只取那之后的（增量编）；否则取这类命令在所有 worktree 的（按冷编估）。
+pub fn disk_samples(c: &Connection, profile_key: &str, worktree: Option<&str>) -> Result<Vec<DiskSample>> {
+    const DONE: &str = "finished_at IS NOT NULL AND peak_mem_mb IS NOT NULL AND started_at IS NOT NULL";
+    let row = |r: &Row<'_>| -> rusqlite::Result<DiskSample> {
+        Ok(DiskSample { delta_mb: r.get::<_, Option<i64>>(0)?.unwrap_or(0), reliable: r.get::<_, Option<i64>>(1)? == Some(1) })
+    };
+    if let Some(w) = worktree {
+        let first_ok: Option<i64> = c.query_row(
+            "SELECT min(finished_at) FROM executions WHERE profile_key = ?1 AND worktree = ?2 AND status = 'ok'",
+            params![profile_key, w],
+            |r| r.get(0),
+        )?;
+        if let Some(t) = first_ok {
+            let mut q = c.prepare_cached(&format!(
+                "SELECT disk_delta_mb, disk_reliable FROM executions WHERE profile_key = ?1 AND worktree = ?2 AND finished_at > ?3 AND {DONE} \
+                 ORDER BY finished_at DESC LIMIT 20"
+            ))?;
+            let v = q.query_map(params![profile_key, w, t], row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+            if !v.is_empty() {
+                return Ok(v);
+            }
+        }
+    }
+    let mut q = c.prepare_cached(&format!(
+        "SELECT disk_delta_mb, disk_reliable FROM executions WHERE profile_key = ?1 AND {DONE} ORDER BY finished_at DESC LIMIT 20"
+    ))?;
+    let v = q.query_map([profile_key], row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(v)
+}
+
+/// 此刻除了 `id` 之外是否还有磁盘写入来源：别的执行在运行，或 aq 正在建、删 iOS 模拟器或 Android 实例（CASE-EST-17）。
+pub fn disk_shared(c: &Connection, id: &str) -> Result<bool> {
+    Ok(c.query_row(
+        "SELECT EXISTS (SELECT 1 FROM executions WHERE status = 'running' AND id <> ?1) \
+         OR EXISTS (SELECT 1 FROM hold_devices d JOIN holds h ON h.id = d.hold_id \
+                    WHERE d.type IN ('ios-sim','android-emu') \
+                      AND (h.status = 'waiting' OR (h.status IN ('released','reclaimed','rejected') AND d.device IS NOT NULL)))",
+        [id],
+        |r| r.get::<_, i64>(0),
+    )? == 1)
 }
 
 /// 同类命令在某时刻之前结束、有实测的次数（--human 用来说明评估来自哪里）。

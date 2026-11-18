@@ -23,7 +23,8 @@ fn crash_point(name: &str) {
 enum Step {
     Started(Box<Gate>),
     Stop,
-    Wait,
+    /// 没放行；只因排头预留时带上排头和它占着的资源。
+    Wait(Option<(String, Vec<String>)>),
 }
 
 /// 提交前先在事务里读（等提交方提交），读不到或已结束就退出。
@@ -37,7 +38,7 @@ fn evaluate(ctx: &Ctx, store: &mut Store, e: &ExecRow) -> AppResult<Option<bool>
     ctx.log_note(
         &e.id,
         &format!(
-            "资源评估来自{}：重任务 {}，内存 {}MB，磁盘 {}MB，超时 {}s",
+            "estimate from {}: heavy {}, mem {}MB, disk {}MB, timeout {}s",
             est.source.label(),
             est.res.heavy,
             est.res.mem_mb,
@@ -61,12 +62,17 @@ fn try_start(ctx: &Ctx, c: &aq_store::Conn, e: &ExecRow) -> AppResult<Step> {
     if now_row.status != ExecStatus::Queued {
         return Ok(Step::Stop);
     }
-    if !ck.plan.admit.admitted.iter().any(|a| a.id == e.id) {
-        return Ok(Step::Wait);
+    let adm = &ck.plan.admit;
+    if !adm.admitted.iter().any(|a| a.id == e.id) {
+        let head = adm.blocked_by.get(&e.id).map(|h| {
+            let kinds = adm.waiting_for.get(&e.id).map(|k| k.iter().map(|x| x.code()).collect()).unwrap_or_default();
+            (h.clone(), kinds)
+        });
+        return Ok(Step::Wait(head));
     }
     let log = ctx.dirs.log_file(&e.id);
     let env = [("AQ_EXECUTION_ID", e.id.clone())];
-    let launch = Launch { exe: &ctx.exe, argv: &e.argv, cwd: std::path::Path::new(&e.cwd), log: &log, env: &env };
+    let launch = Launch { exe: &ctx.exe, argv: &e.argv, cwd: std::path::Path::new(&e.cwd), log: &log, env: &env, nice: ctx.config.nice };
     let now = ctx.now();
     let gate = match spawn_gated(&launch) {
         Ok(g) => g,
@@ -85,6 +91,7 @@ fn try_start(ctx: &Ctx, c: &aq_store::Conn, e: &ExecRow) -> AppResult<Step> {
                     peak_mem_mb: 0,
                     cpu_avg_cores: 0.0,
                     disk_delta_mb: 0,
+                    disk_reliable: false,
                     content_changed: false,
                 },
             )?;
@@ -100,18 +107,30 @@ fn try_start(ctx: &Ctx, c: &aq_store::Conn, e: &ExecRow) -> AppResult<Step> {
     Ok(Step::Started(Box::new(gate)))
 }
 
-fn queue(ctx: &Ctx, store: &mut Store, e: &ExecRow) -> AppResult<Option<Gate>> {
+/// 排队直到放行；返回闸门和命令启动前一刻的剩余磁盘（排队期间别人写的不算这次的，CASE-EST-15）。
+fn queue(ctx: &Ctx, store: &mut Store, e: &ExecRow) -> AppResult<Option<(Gate, i64)>> {
     let mut round = 0;
+    // 被排头预留挡过：第一次挡住的时刻、最后一次是谁挡的、挡在哪类资源上。放行时写进 aq.log，用来判断要不要给更多资源做回填（CASE-QUEUE-13）
+    let mut blocked: Option<(i64, String, Vec<String>)> = None;
     loop {
         match store.tx(|c| try_start(ctx, c, e))? {
             Step::Started(mut g) => {
                 crash_point("after_commit");
+                let disk_before = ctx.sys.sample().disk_free_mb;
                 g.open().map_err(AppError::Fatal)?;
-                ctx.log_transition(&e.id, "queued", "running", "放行");
-                return Ok(Some(*g));
+                if let Some((since, head, kinds)) = &blocked {
+                    let s = (ctx.now() - since) / 1000;
+                    ctx.log_note(&e.id, &format!("admitted after {s}s blocked by {head} on [{}]", kinds.join(", ")));
+                }
+                ctx.log_transition(&e.id, "queued", "running", "admitted");
+                return Ok(Some((*g, disk_before)));
             }
             Step::Stop => return Ok(None),
-            Step::Wait => {
+            Step::Wait(head) => {
+                if let Some((h, k)) = head {
+                    let since = blocked.as_ref().map_or(ctx.now(), |b| b.0);
+                    blocked = Some((since, h, k));
+                }
                 ctx.pace(round, None);
                 round += 1;
             }
@@ -129,6 +148,7 @@ fn finish(ctx: &Ctx, store: &mut Store, e: &ExecRow, o: &Outcome) -> AppResult<(
         peak_mem_mb: o.peak_mem_mb,
         cpu_avg_cores: o.cpu_avg_cores,
         disk_delta_mb: o.disk_delta_mb,
+        disk_reliable: o.disk_reliable,
         content_changed: changed,
     };
     let removed = store.tx(|c| {
@@ -167,8 +187,7 @@ pub fn run(ctx: &Ctx, store: &mut Store, id: &str, _lock: File) -> AppResult<()>
 
 fn execute(ctx: &Ctx, store: &mut Store, e: &ExecRow) -> AppResult<()> {
     let id = e.id.as_str();
-    let disk_before = ctx.sys.sample().disk_free_mb;
-    let Some(gate) = queue(ctx, store, e)? else { return Ok(()) };
+    let Some((gate, disk_before)) = queue(ctx, store, e)? else { return Ok(()) };
     let Some(row) = aq_store::get_exec(store.conn(), id)? else { return Ok(()) };
     let mut o = watch(ctx, store, &row, gate)?;
     o.disk_delta_mb = (disk_before - ctx.sys.sample().disk_free_mb).max(0);

@@ -20,6 +20,8 @@ pub struct Outcome {
     pub peak_mem_mb: i64,
     pub cpu_avg_cores: f64,
     pub disk_delta_mb: i64,
+    /// 运行期间没见到别的磁盘写入来源（CASE-EST-17）。
+    pub disk_reliable: bool,
     pub why: String,
 }
 
@@ -34,7 +36,7 @@ fn cap_log(ctx: &Ctx, e: &ExecRow) {
     // 命令以追加方式写日志，清空后继续写在文件末尾（CASE-RUN-9、CASE-STATUS-5）
     if let Ok(mut f) = std::fs::OpenOptions::new().write(true).open(&p) {
         let mb = ctx.tuning.log_cap_bytes / (1024 * 1024);
-        let _ = f.set_len(0).and_then(|_| f.write_all(format!("[aq] 日志超过 {mb}MB，之前的内容已清空\n").as_bytes()));
+        let _ = f.set_len(0).and_then(|_| f.write_all(format!("[aq] log exceeded {mb}MB; earlier output was cleared\n").as_bytes()));
         // 截断失败下一秒再试
     }
 }
@@ -71,7 +73,10 @@ fn cpu_tick(ctx: &Ctx, store: &Store, e: &ExecRow, pgid: i64, w: &mut CpuWatch, 
         *light = false;
         if aq_store::mark_heavy(store.conn(), &e.id)? {
             let cores = w.window_cores().unwrap_or(0.0);
-            ctx.log_note(&e.id, &format!("运行中实测 {cores:.1} 核 ≥ 2，改记重任务（占重任务名额，不中止）"));
+            ctx.log_note(
+                &e.id,
+                &format!("measured {cores:.1} cores >= 2 while running; now booked as heavy (takes a heavy slot, not stopped)"),
+            );
         }
     }
     Ok(())
@@ -91,30 +96,35 @@ pub fn watch(ctx: &Ctx, store: &Store, e: &ExecRow, mut gate: Gate) -> AppResult
     let mut rounds = 0u32;
     let mut cpu = CpuWatch::new(ctx.tuning.heavy_window_ms);
     let mut light = e.res.is_some_and(|r| !r.heavy);
+    // 开始时看一次，之后每个 poll 看一次，结束时再看一次；查不到按不可靠处理
+    let shared = |s: &Store| aq_store::disk_shared(s.conn(), &e.id).unwrap_or(true);
+    let mut disk_reliable = !shared(store);
     let (status, code, why, exit) = loop {
         if let Ok(Some(x)) = gate.reap(false) {
             let c = code_of(x.status);
             let st = if c == 0 { ExecStatus::Ok } else { ExecStatus::Failed };
-            break (st, Some(c), format!("命令退出码 {c}"), Some(x));
+            break (st, Some(c), format!("command exited with {c}"), Some(x));
         }
         peak = peak.max(ctx.procs.group_mem_mb(pgid));
         cpu_tick(ctx, store, e, pgid, &mut cpu, &mut light)?;
         if ctx.clock.uptime_ms() - start_up > timeout_ms {
             let x = terminate(ctx, &mut gate, pgid);
-            break (ExecStatus::Timeout, None, format!("超过超时 {}s，已终止", timeout_ms / 1000), x);
+            break (ExecStatus::Timeout, None, format!("exceeded timeout {}s, stopped", timeout_ms / 1000), x);
         }
         if last_poll.elapsed() >= ctx.tuning.poll {
             last_poll = Instant::now();
             cap_log(ctx, e);
+            disk_reliable &= !shared(store);
             let cancel = aq_store::get_exec(store.conn(), &e.id)?.is_some_and(|r| r.cancel_requested);
             if cancel {
                 let x = terminate(ctx, &mut gate, pgid);
-                break (ExecStatus::Cancelled, None, "运行中被撤销，进程组已结束".into(), x);
+                break (ExecStatus::Cancelled, None, "cancelled while running, process group ended".into(), x);
             }
         }
         std::thread::sleep(Duration::from_millis(20u64 << rounds.min(5)).min(SAMPLE).min(ctx.tuning.poll));
         rounds += 1;
     };
+    disk_reliable &= !shared(store);
     // 只取命令这一个进程的用量（wait4）；回收失败时只用采样值（CASE-EST-8）
     let (cpu_s, maxrss_mb) = exit.map_or((0.0, 0), |x| (x.cpu_s, x.maxrss_mb));
     let wall = start_wall.elapsed().as_secs_f64().max(0.001);
@@ -125,6 +135,7 @@ pub fn watch(ctx: &Ctx, store: &Store, e: &ExecRow, mut gate: Gate) -> AppResult
         peak_mem_mb: peak.max(maxrss_mb),
         cpu_avg_cores: (cpu_s / wall).max(cpu.overall_cores().unwrap_or(0.0)),
         disk_delta_mb: 0,
+        disk_reliable,
         why,
     })
 }

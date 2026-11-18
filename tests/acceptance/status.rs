@@ -56,9 +56,9 @@ fn human_same_exit_code() {
     let e = Env::new();
     let r = e.aq(&["run", "--human", "--", "sh", "-c", "exit 3"]);
     assert_eq!(r.code, 1);
-    assert!(r.stdout.contains("failed") && r.stdout.contains("日志"), "{}", r.stdout);
+    assert!(r.stdout.contains("failed") && r.stdout.contains("log "), "{}", r.stdout);
     let h = e.aq(&["status", "--human"]);
-    assert!(h.stdout.contains("目录") && h.stdout.contains("资源"), "{}", h.stdout);
+    assert!(h.stdout.contains("dirs") && h.stdout.contains("resources"), "{}", h.stdout);
     let x = e.aq(&["status", "ex_nope", "--human"]);
     assert_eq!(x.code, 3);
 }
@@ -115,7 +115,7 @@ fn db_deleted_recreated_and_unwritable_state_reports_path() {
     std::fs::set_permissions(&ro, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
     assert_eq!(r.code, 1);
     let msg = r.one()["message"].as_str().unwrap();
-    assert!(msg.contains(ro.to_str().unwrap()) && msg.contains("沙箱"), "CASE-FAULT-7 给出需要放行的路径：{msg}");
+    assert!(msg.contains(ro.to_str().unwrap()) && msg.contains("sandbox"), "CASE-FAULT-7 给出需要放行的路径：{msg}");
 }
 
 // CASE-STATUS-4
@@ -180,7 +180,7 @@ fn deletion_note_names_the_device_type() {
     e.aq(&["release", &b.id()]);
     assert!(until(10, || {
         e.aq(&["status"]);
-        e.aq_log().contains("浏览器会话")
+        e.aq_log().contains("browser session")
     }));
-    assert!(!e.aq_log().contains("模拟器"), "浏览器会话不叫模拟器：{}", e.aq_log());
+    assert!(!e.aq_log().contains("simulator"), "浏览器会话不叫模拟器：{}", e.aq_log());
 }

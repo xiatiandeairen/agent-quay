@@ -202,3 +202,113 @@ fn status_of_pruned_id_is_usage() {
     let s = e.aq(&["status", &a.id()]);
     assert_eq!((s.code, s.one()["reason"].as_str()), (3, Some("usage")), "{}", s.stdout);
 }
+
+/// 忽略 SIGTERM、睡 60 秒的命令（只能被 SIGKILL 结束）；装好信号处理后建 argv[1] 这个文件。
+const IGNORE_TERM: &str =
+    "import signal, sys, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); open(sys.argv[1], 'w').close(); time.sleep(60)";
+
+/// 提交 IGNORE_TERM，等到它已经在忽略 SIGTERM。
+fn run_ignoring_term(e: &Env, env: &[(&str, &str)]) -> Res {
+    let ready = e.path(&format!("ready-{}", std::process::id()));
+    let _ = std::fs::remove_file(&ready);
+    let r = aq_with(e, env, &["run", "--fresh", "--wait", "0", "--", "python3", "-c", IGNORE_TERM, ready.to_str().unwrap()]);
+    assert!(until(10, || ready.exists()), "命令没起来：{}", r.stdout);
+    r
+}
+
+fn alive(pid: &str) -> bool {
+    std::process::Command::new("kill").args(["-0", pid]).stderr(std::process::Stdio::null()).status().is_ok_and(|s| s.success())
+}
+
+/// 用单独的环境变量跑一次 aq（只影响这一个进程，比如 runner 和 cancel 用不同的宽限期）。
+fn aq_with(e: &Env, env: &[(&str, &str)], args: &[&str]) -> Res {
+    let mut c = e.command(args);
+    c.envs(env.iter().copied()).stdin(std::process::Stdio::null());
+    parse(c.output().expect("aq"))
+}
+
+fn transitions_to(e: &Env, id: &str, to: &str) -> usize {
+    e.aq_log().lines().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()).filter(|v| v["id"] == id && v["to"] == to).count()
+}
+
+// CASE-CANCEL-2, CASE-STATUS-3
+#[test]
+fn cancel_returns_after_group_is_gone() {
+    let e = Env::new();
+    let pids = e.path("pids");
+    let r = e.aq(&["run", "--wait", "0", "--", "fake-task", "--secs", "30", "--count", pids.to_str().unwrap()]);
+    assert!(until(10, || e.aq(&["status", &r.id()]).status() == "running"));
+    assert!(until(10, || pids.exists()));
+    let pid = std::fs::read_to_string(&pids).unwrap().trim().to_string();
+    let c = e.aq(&["cancel", &r.id()]);
+    assert_eq!((c.code, c.status()), (0, "cancelled"), "{}", c.stdout);
+    assert!(c.one().get("cancel_requested").is_none(), "到终态后不带 cancel_requested");
+    assert!(!alive(&pid), "cancel 返回时命令进程已结束");
+}
+
+// CASE-CANCEL-5
+#[test]
+fn cancel_waits_through_sigkill_for_term_ignoring_command() {
+    let e = Env::new();
+    let r = run_ignoring_term(&e, &[]);
+    let t = Instant::now();
+    let c = e.aq(&["cancel", &r.id()]);
+    assert_eq!((c.code, c.status()), (0, "cancelled"), "{}", c.stdout);
+    let took = t.elapsed();
+    assert!(took >= Duration::from_millis(900) && took < Duration::from_secs(6), "宽限期 1 秒后 SIGKILL：{took:?}");
+}
+
+// CASE-CANCEL-6, CASE-STATUS-3
+#[test]
+fn cancel_gives_up_waiting_with_cancel_requested() {
+    let e = Env::new();
+    // runner 的宽限期 20 秒；cancel 自己只等 1 + 5 秒
+    let r = run_ignoring_term(&e, &[("AQ_T_KILL_GRACE_MS", "20000")]);
+    let t = Instant::now();
+    let c = e.aq(&["cancel", &r.id()]);
+    assert!(t.elapsed() < Duration::from_secs(8));
+    assert_eq!((c.code, c.status()), (0, "running"), "{}", c.stdout);
+    assert_eq!(c.one()["cancel_requested"], true);
+    assert_eq!(e.wait_status(&r.id(), 30, &["cancelled"]).status(), "cancelled");
+}
+
+// CASE-CANCEL-7
+#[test]
+fn cancel_racing_natural_exit_reports_real_outcome() {
+    let e = Env::new();
+    // runner 5 秒才查一次撤销请求（排队轮询也是 5 秒），命令开始后 1 秒就自己结束：撤销请求还没被处理，命令已经退出
+    e.set_sys_with(serde_json::json!({"pressure": "normal", "swapping": false})); // 不受本机真实内存压力影响
+    let started = e.path("started");
+    let script = format!("touch {}; sleep 1", started.display());
+    let r = aq_with(&e, &[("AQ_T_POLL_MS", "5000")], &["run", "--wait", "0", "--", "sh", "-c", &script]);
+    assert!(until(20, || started.exists()), "命令没起来：{}", r.stdout);
+    let c = e.aq(&["cancel", &r.id()]);
+    assert_eq!((c.code, c.status()), (0, "ok"), "{}", c.stdout);
+}
+
+// CASE-CANCEL-8
+#[test]
+fn concurrent_cancels_stop_once() {
+    let e = Env::new();
+    let r = e.aq(&["run", "--wait", "0", "--", "fake-task", "--secs", "30"]);
+    assert!(until(10, || e.aq(&["status", &r.id()]).status() == "running"));
+    let kids: Vec<_> = (0..2).map(|_| e.spawn(&["cancel", &r.id()])).collect();
+    for k in kids {
+        let out = k.wait_with_output().unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(v["status"], "cancelled");
+    }
+    assert_eq!(transitions_to(&e, &r.id(), "cancelled"), 1, "{}", e.aq_log());
+}
+
+// CASE-CANCEL-9
+#[test]
+fn interrupted_cancel_still_cancels() {
+    let e = Env::new();
+    let r = run_ignoring_term(&e, &[("AQ_T_KILL_GRACE_MS", "3000")]);
+    let mut k = e.spawn(&["cancel", &r.id()]);
+    assert!(until(5, || e.q_i64(&format!("SELECT cancel_requested FROM executions WHERE id='{}'", r.id())) == 1));
+    std::process::Command::new("kill").args(["-INT", &k.id().to_string()]).status().unwrap();
+    let _ = k.wait();
+    assert_eq!(e.wait_status(&r.id(), 20, &["cancelled"]).status(), "cancelled");
+}

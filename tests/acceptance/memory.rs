@@ -110,7 +110,7 @@ fn long_pressure_keeps_queueing_and_explains() {
     let late = e.aq(&["status", &r.id()]);
     assert_eq!((late.code, late.status()), (2, "queued"), "超过上限仍排队，不失败");
     assert!(late.one()["mem_pressure_s"].as_i64().unwrap() >= 2);
-    assert!(late.one()["message"].as_str().unwrap().contains("系统内存压力"), "{}", late.stdout);
+    assert!(late.one()["message"].as_str().unwrap().contains("System memory pressure"), "{}", late.stdout);
     e.set_sys_with(json!({"pressure": "normal"}));
     assert_eq!(e.aq(&["status", &r.id(), "--wait", "20"]).status(), "ok");
     assert!(!e.state().join("mem-pressure-since").exists(), "压力回落后清掉开始时刻");

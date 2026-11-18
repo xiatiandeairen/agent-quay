@@ -27,9 +27,9 @@ impl Probe {
         let mut argv = base.to_vec();
         argv.extend(args.iter().map(|s| s.to_string()));
         let o = run(&Call { argv: &argv, cwd: None, env: &[], stdin: None, timeout: Duration::from_secs(30) })
-            .map_err(|e| format!("{what} 运行失败：{e}"))?;
+            .map_err(|e| format!("{what} failed to run: {e}"))?;
         if o.status != 0 {
-            return Err(format!("{what} 出错（退出码 {}）：{}", o.status, o.stderr.trim()));
+            return Err(format!("{what} failed (exit {}): {}", o.status, o.stderr.trim()));
         }
         Ok(String::from_utf8_lossy(&o.stdout).into_owned())
     }
@@ -40,11 +40,11 @@ impl RealDevices for Probe {
         match t {
             DeviceType::IosDevice => {
                 let out =
-                    Self::call(&self.devicectl, &["list", "devices", "-q", "--json-output", "/dev/stdout"], "devicectl（需要 Xcode）")?;
+                    Self::call(&self.devicectl, &["list", "devices", "-q", "--json-output", "/dev/stdout"], "devicectl (needs Xcode)")?;
                 parse_devicectl(&out)
             }
             DeviceType::AndroidDevice => {
-                Ok(parse_adb(&Self::call(&self.adb, &["devices", "-l"], "adb（需要 Android SDK platform-tools）")?))
+                Ok(parse_adb(&Self::call(&self.adb, &["devices", "-l"], "adb (needs Android SDK platform-tools)")?))
             }
             _ => Ok(vec![]),
         }

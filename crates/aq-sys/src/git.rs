@@ -22,7 +22,7 @@ impl Ctx {
     fn git(&self, dir: &Path, args: &[&str]) -> Result<String, String> {
         let left = self.deadline.saturating_duration_since(Instant::now());
         if left.is_zero() {
-            return Err("计算指纹超时".into());
+            return Err("fingerprint timed out".into());
         }
         let mut argv = vec!["git".to_string(), "-C".into(), dir.to_string_lossy().into_owned()];
         argv.extend(args.iter().map(|s| s.to_string()));
@@ -48,7 +48,7 @@ fn dirty_digest(cx: &Ctx, dir: &Path, h: &mut blake3::Hasher) -> Result<bool, St
                 h.update(std::fs::read_link(&p).map(|t| t.to_string_lossy().into_owned()).unwrap_or_default().as_bytes());
             }
             Ok(m) if m.is_file() => {
-                let bytes = std::fs::read(&p).map_err(|e| format!("读取 {} 失败：{e}", p.display()))?;
+                let bytes = std::fs::read(&p).map_err(|e| format!("cannot read {}: {e}", p.display()))?;
                 h.update(blake3::hash(&bytes).as_bytes());
             }
             _ => {}

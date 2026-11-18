@@ -17,6 +17,7 @@ fi
 name="$2"
 case "$3" in
   open)
+    ps -o nice= -p $$ | tr -d ' ' > "$D/nice.last"
     touch "$D/sessions/$name"
     [ -e "$D/fail_open" ] && { echo "fake: chrome failed to launch" >&2; exit 1; }
     [ -n "$FAKE_BROWSER_OPEN_SECS" ] && sleep "$FAKE_BROWSER_OPEN_SECS"

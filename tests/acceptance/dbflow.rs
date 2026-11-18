@@ -111,8 +111,11 @@ fn timeout_and_cancel_fields() {
         "CASE-STORE-1"
     );
     let e = Env::new();
-    let r = e.aq(&["run", "--wait", "0", "--", "sh", "-c", "trap '' TERM; sleep 30"]);
+    // runner 的宽限期 20 秒、cancel 只等 1 + 5 秒：cancel 返回时还处在「已请求撤销、进程组未结束」这一步（CASE-CANCEL-6）
+    let mut c = e.command(&["run", "--wait", "0", "--", "sh", "-c", "trap '' TERM; sleep 30"]);
+    let r = parse(c.env("AQ_T_KILL_GRACE_MS", "20000").stdin(std::process::Stdio::null()).output().unwrap());
     assert!(until(10, || e.aq(&["status", &r.id()]).status() == "running"));
+    std::thread::sleep(std::time::Duration::from_millis(300)); // 让 sh 先装好 trap
     e.aq(&["cancel", &r.id()]);
     let (st, flag) = (
         e.q_str(&format!("SELECT status FROM executions WHERE id='{}'", r.id())).unwrap(),

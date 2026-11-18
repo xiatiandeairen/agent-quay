@@ -26,9 +26,9 @@ pub enum Source {
 impl Source {
     pub fn label(self) -> &'static str {
         match self {
-            Source::Measured => "实测",
-            Source::Ai => "AI 评估",
-            Source::FirstSeen => "首次见到（按轻任务）",
+            Source::Measured => "measurements",
+            Source::Ai => "AI estimate",
+            Source::FirstSeen => "first seen (booked as light)",
         }
     }
 }
@@ -71,13 +71,37 @@ fn weighted<F: Fn(&Sample) -> f64>(newest_first: &[Sample], f: F) -> Vec<(f64, f
 
 /// 内存、磁盘：1 次取峰值 × 1.2；≥ 2 次取加权 p90 × 1.1。
 fn upper(newest_first: &[Sample], f: impl Fn(&Sample) -> f64) -> i64 {
-    let n = newest_first.len().min(HISTORY);
-    let v = if n == 1 {
-        newest_first.first().map_or(0.0, &f) * 1.2
-    } else {
-        weighted_quantile(&weighted(newest_first, f), 0.9).unwrap_or(0.0) * 1.1
+    let vals: Vec<f64> = newest_first.iter().take(HISTORY).map(f).collect();
+    upper_of(&vals)
+}
+
+fn upper_of(newest_first: &[f64]) -> i64 {
+    let v = match newest_first {
+        [] => 0.0,
+        [x] => x * 1.2,
+        _ => {
+            let pairs: Vec<(f64, f64)> = newest_first.iter().enumerate().map(|(k, x)| (*x, DECAY.powi(k as i32))).collect();
+            weighted_quantile(&pairs, 0.9).unwrap_or(0.0) * 1.1
+        }
     };
     v.ceil() as i64
+}
+
+/// 一次实测的磁盘增量，以及它是否可靠（运行期间没有别的写入来源）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DiskSample {
+    pub delta_mb: i64,
+    pub reliable: bool,
+}
+
+/// 磁盘估计（CASE-EST-17）：有可靠实测时只用可靠的，算法同内存；只有不可靠的时取其中最小值
+/// （别的写入来源只会往上加，每个不可靠值都是偏大的上限）；没有实测返回 None。
+pub fn disk_upper(newest_first: &[DiskSample]) -> Option<i64> {
+    let ok: Vec<f64> = newest_first.iter().filter(|s| s.reliable).take(HISTORY).map(|s| s.delta_mb.max(0) as f64).collect();
+    if !ok.is_empty() {
+        return Some(upper_of(&ok));
+    }
+    newest_first.iter().map(|s| s.delta_mb.max(0)).min()
 }
 
 /// 加权后 ≥ 2 核的执行占总权重一半以上。

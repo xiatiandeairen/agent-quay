@@ -50,7 +50,7 @@ pub fn summary(ctx: &Ctx, store: &Store) -> AppResult<Value> {
 
 /// 不带 id：第一行全局概况，之后每行一个活动的执行或未归还的借用。
 pub fn overview(ctx: &Ctx, store: &mut Store) -> AppResult<(Vec<Value>, i32)> {
-    let waiting = check::check(ctx, store)?.plan.admit.waiting_for;
+    let waiting = check::check(ctx, store)?.plan.admit;
     let note = pressure_note(ctx);
     let mut out = vec![summary(ctx, store)?];
     let soonest = soonest_free_s(ctx, store)?;
@@ -77,13 +77,13 @@ fn one(ctx: &Ctx, store: &Store, id: &str, soonest: Option<i64>) -> AppResult<(V
         if h.status == HoldStatus::Held {
             let gone = missing_devices(ctx, store, id)?;
             if !gone.is_empty() {
-                ctx.log_note(id, &format!("借出的设备已不在：{}", gone.join(", ")));
+                ctx.log_note(id, &format!("held devices are gone: {}", gone.join(", ")));
                 v["missing"] = json!(gone);
             }
         }
         return Ok((v, h.status.exit_code(), h.status.is_settled()));
     }
-    Ok((view::rejected_with_id(id, "usage", "id 不存在（或已被保留策略清理）"), 3, true))
+    Ok((view::rejected_with_id(id, "usage", "no such id (or already pruned by retention)"), 3, true))
 }
 
 /// 内存压力持续了多久（读状态目录的开始时间，检查时已更新）。
@@ -122,7 +122,7 @@ fn missing_devices(ctx: &Ctx, store: &Store, hold_id: &str) -> AppResult<Vec<Str
 
 /// 带 id：逐个查；带 --wait 每隔 poll 查一次，直到全部结束或到期。退出码取最大。
 pub fn by_ids(ctx: &Ctx, store: &mut Store, ids: &[String], wait_s: Option<u64>) -> AppResult<(Vec<Value>, i32)> {
-    let mut waiting = check::check(ctx, store)?.plan.admit.waiting_for;
+    let mut waiting = check::check(ctx, store)?.plan.admit;
     let deadline = Instant::now() + Duration::from_secs(wait_s.unwrap_or(0));
     let mut round = 0;
     loop {
@@ -131,7 +131,7 @@ pub fn by_ids(ctx: &Ctx, store: &mut Store, ids: &[String], wait_s: Option<u64>)
         let done = rows.iter().all(|r| r.2);
         if done || Instant::now() >= deadline {
             if !done && round > 0 {
-                waiting = check::check(ctx, store)?.plan.admit.waiting_for; // 等了一阵还没结束：按最新一次检查报在等什么
+                waiting = check::check(ctx, store)?.plan.admit; // 等了一阵还没结束：按最新一次检查报在等什么
             }
             let code = rows.iter().map(|r| r.1).max().unwrap_or(0);
             let mut out: Vec<Value> = rows.into_iter().map(|r| r.0).collect();
@@ -148,7 +148,7 @@ pub fn by_ids(ctx: &Ctx, store: &mut Store, ids: &[String], wait_s: Option<u64>)
 
 pub fn require_ids(ids: &[String]) -> AppResult<()> {
     if ids.iter().any(|i| i.is_empty()) {
-        return Err(AppError::Usage("id 不能为空".into()));
+        return Err(AppError::Usage("id cannot be empty".into()));
     }
     Ok(())
 }

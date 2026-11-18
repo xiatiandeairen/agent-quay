@@ -15,9 +15,14 @@ pub struct AgentBrowser {
 }
 
 impl AgentBrowser {
-    pub fn from_env() -> AgentBrowser {
-        let cmd = std::env::var("AQ_AGENT_BROWSER").unwrap_or_else(|_| "agent-browser".into());
-        AgentBrowser { cmd: vec![cmd] }
+    /// 比 aq 自己的优先级低时经 `/usr/bin/nice` 启动，它拉起的 Chrome 继承这个优先级（CASE-PROT-3）。
+    /// `nice -n` 是相对值：按目标值减去 aq 当前的 nice，aq 本身已被降过时不会叠加。
+    pub fn from_env(nice: i32) -> AgentBrowser {
+        let bin = std::env::var("AQ_AGENT_BROWSER").unwrap_or_else(|_| "agent-browser".into());
+        // SAFETY: getpriority 只读当前进程的优先级。
+        let inc = nice - unsafe { libc::getpriority(libc::PRIO_PROCESS, 0) };
+        let cmd = if inc > 0 { vec!["/usr/bin/nice".into(), "-n".into(), inc.to_string(), bin] } else { vec![bin] };
+        AgentBrowser { cmd }
     }
 
     fn call(&self, args: &[&str], secs: u64) -> Result<String, String> {
@@ -37,7 +42,7 @@ impl AgentBrowser {
             data: Data,
         }
         let text = self.call(&["session", "list", "--json"], 30)?;
-        let o: Out = serde_json::from_str(&text).map_err(|e| format!("解析 agent-browser 会话列表失败：{e}"))?;
+        let o: Out = serde_json::from_str(&text).map_err(|e| format!("cannot parse the agent-browser session list: {e}"))?;
         Ok(o.data.sessions)
     }
 }
@@ -46,7 +51,7 @@ impl Simulator for AgentBrowser {
     fn create(&self, name: &str) -> Result<String, String> {
         if let Err(e) = self.call(&["--session", name, "open", "about:blank"], 120) {
             let _ = self.call(&["--session", name, "close"], 30); // 起了一半的 Chrome 一并关掉；关不掉由对账兜底
-            return Err(format!("agent-browser 打开会话 {name} 失败：{e}"));
+            return Err(format!("agent-browser could not open session {name}: {e}"));
         }
         Ok(name.to_string())
     }

@@ -27,18 +27,20 @@ pub struct HoldArgs {
 
 fn parse(a: &HoldArgs) -> AppResult<HoldRequest> {
     if a.devices.is_empty() {
-        return Err(AppError::Usage("至少写一台设备：aq hold <ios-sim|android-emu|ios-device|android-device|browser|desktop>...".into()));
+        return Err(AppError::Usage(
+            "name at least one device: aq hold <ios-sim|android-emu|ios-device|android-device|browser|desktop>...".into(),
+        ));
     }
     let mut devices = vec![];
     for d in &a.devices {
         devices.push(DeviceType::parse(d).ok_or_else(|| {
-            AppError::Usage(format!("设备类型不存在：{d}（可选 ios-sim、android-emu、ios-device、android-device、browser、desktop）"))
+            AppError::Usage(format!("unknown device type: {d} (one of ios-sim, android-emu, ios-device, android-device, browser, desktop)"))
         })?);
     }
     let mut seen = HashSet::new();
     for acc in &a.accounts {
         if acc.is_empty() || !seen.insert(acc) {
-            return Err(AppError::Usage(format!("账号重复或为空：{acc:?}")));
+            return Err(AppError::Usage(format!("account repeated or empty: {acc:?}")));
         }
     }
     Ok(HoldRequest { devices, accounts: a.accounts.clone(), exclude: vec![] })
@@ -81,9 +83,9 @@ pub fn hold(ctx: &Ctx, store: &mut Store, a: &HoldArgs) -> AppResult<(Value, i32
         check::check_in(ctx, c, None)?;
         aq_store::insert_hold(c, &NewHold { id: &id, request: &req, owner: who, requested_at: ctx.now() })?;
         let lock = aq_sys::lock::try_lock_path(&ctx.dirs.lock_file(&id)).map_err(AppError::Fatal)?;
-        lock.ok_or_else(|| AppError::Fatal(format!("新借用的锁被占用：{id}")))
+        lock.ok_or_else(|| AppError::Fatal(format!("lock of the new hold is taken: {id}")))
     })?;
-    ctx.log_transition(&id, "", "waiting", &format!("提交，借用者 pid {}", who.pid));
+    ctx.log_transition(&id, "", "waiting", &format!("submitted, holder pid {}", who.pid));
     spawn::runner(ctx, &id, inheritable(&lock).map_err(AppError::Fatal)?)?;
     drop(lock);
     let deadline = Instant::now() + Duration::from_secs(a.wait_s.unwrap_or(ctx.tuning.default_wait_s));
@@ -93,7 +95,7 @@ pub fn hold(ctx: &Ctx, store: &mut Store, a: &HoldArgs) -> AppResult<(Value, i32
 pub fn wait_hold(ctx: &Ctx, store: &Store, id: &str, deadline: Instant) -> AppResult<(Value, i32)> {
     let mut round = 0;
     loop {
-        let h = aq_store::get_hold(store.conn(), id)?.ok_or_else(|| AppError::Usage(format!("借用不存在：{id}")))?;
+        let h = aq_store::get_hold(store.conn(), id)?.ok_or_else(|| AppError::Usage(format!("no such hold: {id}")))?;
         if h.status.is_settled() || Instant::now() >= deadline {
             if h.status == HoldStatus::Held {
                 touch_if_missing(ctx, id);
@@ -121,7 +123,7 @@ fn cleanup_half_made(ctx: &Ctx, store: &mut Store, h: &HoldRow) -> AppResult<()>
         for (name, id) in backend.list_aq().unwrap_or_default() {
             if ctx.my_hold_of(&name).as_deref() == Some(h.id.as_str()) {
                 let _ = backend.delete(&id); // 删失败由定期对账兜底
-                ctx.log_note(&h.id, &format!("删除上一个 runner 留下的半成品 {name}"));
+                ctx.log_note(&h.id, &format!("deleting half-made {name} left by the previous runner"));
             }
         }
     }
@@ -189,7 +191,7 @@ pub fn runner(ctx: &Ctx, store: &mut Store, id: &str, _lock: File) -> AppResult<
         Err((made, e)) => {
             discard(ctx, &made);
             if store.tx(|c| aq_store::reject_hold(c, id, ctx.now()))? {
-                ctx.log_transition(id, "waiting", "rejected", &format!("device_error：{e}"));
+                ctx.log_transition(id, "waiting", "rejected", &format!("device_error: {e}"));
             }
             return Ok(());
         }
@@ -205,7 +207,7 @@ pub fn runner(ctx: &Ctx, store: &mut Store, id: &str, _lock: File) -> AppResult<
     })?;
     if held {
         touch_used(ctx, id);
-        ctx.log_transition(id, "waiting", "held", "设备已就绪");
+        ctx.log_transition(id, "waiting", "held", "devices ready");
     } else {
         discard(ctx, &made); // 创建期间被撤销：删掉刚建好的
     }

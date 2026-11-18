@@ -33,7 +33,7 @@ fn reader<R: Read + Send + 'static>(r: Option<R>) -> std::thread::JoinHandle<Vec
 }
 
 pub fn run(c: &Call<'_>) -> Result<Out, String> {
-    let (prog, args) = c.argv.split_first().ok_or("空命令")?;
+    let (prog, args) = c.argv.split_first().ok_or("empty command")?;
     let mut cmd = Command::new(prog);
     cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped()).process_group(0);
     cmd.stdin(if c.stdin.is_some() { Stdio::piped() } else { Stdio::null() });
@@ -43,7 +43,7 @@ pub fn run(c: &Call<'_>) -> Result<Out, String> {
     for (k, v) in c.env {
         cmd.env(k, v);
     }
-    let mut child = cmd.spawn().map_err(|e| format!("无法执行 {prog}：{e}"))?;
+    let mut child = cmd.spawn().map_err(|e| format!("cannot execute {prog}: {e}"))?;
     if let (Some(input), Some(mut w)) = (c.stdin, child.stdin.take()) {
         let input = input.to_vec();
         std::thread::spawn(move || {
@@ -58,7 +58,7 @@ pub fn run(c: &Call<'_>) -> Result<Out, String> {
             // SAFETY: killpg 只发信号。子进程是自己进程组的组长。
             unsafe { libc::killpg(child.id() as i32, libc::SIGKILL) };
             let _ = child.wait(); // 回收僵尸进程；已强杀，等待结果不重要
-            return Err(format!("{prog} 超过 {} 秒未返回，已终止", c.timeout.as_secs()));
+            return Err(format!("{prog} did not return within {}s, stopped", c.timeout.as_secs()));
         }
     };
     let stdout = out.join().unwrap_or_default();
@@ -70,7 +70,7 @@ pub fn run(c: &Call<'_>) -> Result<Out, String> {
 pub fn ok_text(c: &Call<'_>) -> Result<String, String> {
     let o = run(c)?;
     if o.status != 0 {
-        return Err(format!("{} 退出码 {}：{}", c.argv.join(" "), o.status, o.stderr.trim()));
+        return Err(format!("{} exited with {}: {}", c.argv.join(" "), o.status, o.stderr.trim()));
     }
     Ok(String::from_utf8_lossy(&o.stdout).into_owned())
 }

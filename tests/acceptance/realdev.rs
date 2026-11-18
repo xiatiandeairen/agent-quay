@@ -46,7 +46,7 @@ fn only_declared_unavailable_rejected_without_queueing() {
     let o = r.one();
     assert_eq!((r.code, o["status"].as_str(), o["reason"].as_str()), (3, Some("rejected"), Some("device_unavailable")), "{}", r.stdout);
     assert_eq!(o["unavailable"][0]["id"], "phone-1");
-    assert!(o["unavailable"][0]["why"].as_str().unwrap().contains("找不到"), "{o}");
+    assert!(o["unavailable"][0]["why"].as_str().unwrap().contains("cannot find"), "{o}");
     assert!(o.get("undeclared").is_none() && o.get("config_snippet").is_none(), "没有未声明的设备就不带");
     assert_eq!(e.q_i64("SELECT count(*) FROM holds"), 0, "不排队、不留借用");
 }
@@ -115,7 +115,7 @@ fn android_unauthorized_rejected_emulator_not_listed() {
     let r = e.aq(&["hold", "android-device"]);
     let o = r.one();
     assert_eq!((r.code, o["reason"].as_str()), (3, Some("device_unavailable")), "{}", r.stdout);
-    assert!(o["unavailable"][0]["why"].as_str().unwrap().contains("授权"), "{o}");
+    assert!(o["unavailable"][0]["why"].as_str().unwrap().contains("not authorized"), "{o}");
     assert!(o.get("undeclared").is_none(), "emulator-5554 是模拟器，不算未声明的真机：{o}");
 }
 

@@ -270,3 +270,22 @@ fn real_month_estimates_match_hand_calc() {
 fn aq_store_params(id: String, kind: String, start: i64, fin: i64, peak: i64, cpu: f64) -> Vec<Box<dyn aq_store::ToSql>> {
     vec![Box::new(id), Box::new(kind), Box::new(start), Box::new(fin), Box::new(peak), Box::new(cpu)]
 }
+
+// CASE-EST-18
+#[test]
+fn v2_rows_upgrade_with_unknown_disk_reliability() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("aq.db");
+    {
+        let c = Conn::open(&p).unwrap();
+        c.execute_batch(&std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/storage/fixtures/v1/aq.sql")).unwrap())
+            .unwrap();
+        c.pragma_update(None, "user_version", 1).unwrap();
+    }
+    let s = Store::open(&p).unwrap();
+    let unknown: i64 =
+        s.conn().query_row("SELECT count(*) FROM executions WHERE disk_reliable IS NULL AND worktree IS NULL", [], |r| r.get(0)).unwrap();
+    assert_eq!(unknown, 2, "旧记录升级后可靠性未知、没有 worktree");
+    let pk: String = s.conn().query_row("SELECT profile_key FROM executions LIMIT 1", [], |r| r.get(0)).unwrap();
+    assert!(aq_store::disk_samples(s.conn(), &pk, None).unwrap().iter().all(|x| !x.reliable), "旧记录按不可靠处理");
+}

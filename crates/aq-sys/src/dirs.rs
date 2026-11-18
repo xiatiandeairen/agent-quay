@@ -19,7 +19,7 @@ pub struct Dirs {
 
 impl Dirs {
     pub fn resolve() -> Result<Dirs, String> {
-        let x = Xdg::new().map_err(|e| format!("找不到 HOME 目录：{e}"))?;
+        let x = Xdg::new().map_err(|e| format!("cannot find the HOME directory: {e}"))?;
         let state_root = x.state_dir().unwrap_or_else(|| x.home_dir().join(".local/state"));
         Ok(Self::at(&x.config_dir().join("aq/config.toml"), &state_root.join("aq")))
     }
@@ -67,5 +67,5 @@ impl Dirs {
 }
 
 fn unwritable(p: &Path, e: &std::io::Error) -> String {
-    format!("STATE 目录不可写：{}（{e}）。若在沙箱里，把这个目录加入允许写入的路径", p.display())
+    format!("state directory is not writable: {} ({e}). In a sandbox, add this directory to the writable paths", p.display())
 }

@@ -42,10 +42,10 @@ pub fn run(ctx: &Ctx, store: &mut Store) -> AppResult<()> {
             let r = ctx.virtual_backend(t).map_or(Ok(()), |b| b.delete(&udid));
             let what = device_noun(t);
             if let Err(e) = r {
-                ctx.log_note(&hold_id, &format!("删除{what} {udid} 失败：{e}；下次对账再删"));
+                ctx.log_note(&hold_id, &format!("deleting {what} {udid} failed: {e}; will retry on the next sweep"));
             }
             store.tx(|c| aq_store::delete_device_row(c, &hold_id, seq))?;
-            ctx.log_note(&hold_id, &format!("{what} {udid} 已删除，记账内存释放"));
+            ctx.log_note(&hold_id, &format!("{what} {udid} deleted, its booked memory released"));
         }
     }
     for t in [DeviceType::IosSim, DeviceType::AndroidEmu, DeviceType::Browser] {
@@ -59,11 +59,11 @@ pub fn run(ctx: &Ctx, store: &mut Store) -> AppResult<()> {
 /// 日志里怎么称呼这类设备（CASE-RECLAIM-1）。
 fn device_noun(t: DeviceType) -> &'static str {
     match t {
-        DeviceType::IosSim => "模拟器",
-        DeviceType::AndroidEmu => "Android 实例",
-        DeviceType::Browser => "浏览器会话",
-        DeviceType::Desktop => "桌面会话",
-        DeviceType::IosDevice | DeviceType::AndroidDevice => "真机",
+        DeviceType::IosSim => "simulator",
+        DeviceType::AndroidEmu => "Android emulator",
+        DeviceType::Browser => "browser session",
+        DeviceType::Desktop => "desktop session",
+        DeviceType::IosDevice | DeviceType::AndroidDevice => "physical device",
     }
 }
 
@@ -79,7 +79,7 @@ fn reconcile(ctx: &Ctx, store: &mut Store, t: DeviceType, sim: &dyn Simulator) -
         let keep = waiting.contains(&hold_id) || (held.contains(&hold_id) && known.contains(&udid));
         if !keep {
             let _ = sim.delete(&udid); // 删失败下次对账再删
-            ctx.log_note(&hold_id, &format!("对账：删除残留的{} {name}", device_noun(t)));
+            ctx.log_note(&hold_id, &format!("sweep: deleting leftover {} {name}", device_noun(t)));
         }
     }
     Ok(())

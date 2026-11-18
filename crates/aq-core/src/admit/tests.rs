@@ -216,3 +216,78 @@ fn simulator_count_limit() {
     assert_eq!(ids(&admit(&items, one, &c, &sys())), vec!["s", "b"], "还差一台：放行");
     assert!(unschedulable(&hold("x", vec![DeviceType::IosSim; 3], &[]).demand, &c).is_some(), "一次要的超过上限：拒绝");
 }
+
+fn exd(id: &str, heavy: bool, mem: i64, disk: i64) -> Item {
+    Item { id: id.into(), demand: Demand::Exec(Resources { heavy, mem_mb: mem, disk_mb: disk, uses_net: false }) }
+}
+const GB: i64 = 1024;
+
+// CASE-QUEUE-3
+#[test]
+fn blocked_item_names_its_head() {
+    let items = vec![ex("head", false, 29_000), ex("mem", false, 100)];
+    let r = admit(&items, Ledger::default(), &cap(), &sys());
+    assert_eq!(r.blocked_by.get("mem").map(String::as_str), Some("head"));
+    assert_eq!(r.waiting_for["mem"], vec![Kind::Mem]);
+    assert!(!r.blocked_by.contains_key("head"), "排头自己缺资源，不算被挡");
+}
+
+// CASE-QUEUE-8
+#[test]
+fn unreachable_disk_does_not_hold_back_later_tasks() {
+    // 本次真实场景：剩余 57G、底线 50G、排头要 12G、没有运行中任务
+    let s = SysSample { disk_free_mb: 57 * GB, ..sys() };
+    let items = vec![exd("head", false, 1000, 12 * GB), exd("small", false, 500, 186), exd("big", false, 500, 3 * GB)];
+    let r = admit(&items, Ledger::default(), &cap(), &s);
+    assert_eq!(ids(&r), vec!["small", "big"]);
+    assert_eq!(r.waiting_for["head"], vec![Kind::DiskFull]);
+    assert!(r.blocked_by.is_empty());
+    let g = r.disk_full["head"];
+    assert_eq!(g.short_mb(), 12 * GB - 7 * GB, "缺口 = 需要 − (剩余 − 底线 − 运行中记账)");
+}
+
+// CASE-QUEUE-8
+#[test]
+fn reachable_disk_stays_reserved() {
+    // 余量 60 − 50 − 8 = 2G，排头要 6G、缺 4G；运行中任务记账 8G，结束后就够：排头仍预留磁盘，后来要磁盘的不能先走
+    let s = SysSample { disk_free_mb: 60 * GB, ..sys() };
+    let l = Ledger { disk_acct_mb: 8 * GB, ..Ledger::default() };
+    let items = vec![exd("head", false, 1000, 6 * GB), exd("small", false, 500, 186), exd("nodisk", false, 500, 0)];
+    let r = admit(&items, l, &cap(), &s);
+    assert_eq!(ids(&r), vec!["nodisk"]);
+    assert_eq!(r.waiting_for["head"], vec![Kind::Disk]);
+    assert_eq!(r.blocked_by.get("small").map(String::as_str), Some("head"));
+}
+
+// CASE-QUEUE-9
+#[test]
+fn unreachable_disk_still_reserves_other_kinds() {
+    // 排头同时缺内存和等不到的磁盘：内存照样预留给它，磁盘不预留
+    let s = SysSample { disk_free_mb: 57 * GB, mem_avail_mb: 3_000, ..sys() };
+    let items = vec![exd("head", true, 8_000, 12 * GB), exd("mem", false, 1_000, 0), exd("disk", false, 0, 100)];
+    let r = admit(&items, Ledger::default(), &cap(), &s);
+    assert_eq!(ids(&r), vec!["disk"]);
+    assert_eq!(r.waiting_for["head"], vec![Kind::Mem, Kind::DiskFull]);
+    assert_eq!(r.blocked_by.get("mem").map(String::as_str), Some("head"));
+}
+
+// CASE-QUEUE-10
+#[test]
+fn next_blocked_takes_over_as_head() {
+    let s = SysSample { disk_free_mb: 57 * GB, mem_avail_mb: 2_000, ..sys() };
+    let items = vec![exd("disk", false, 100, 12 * GB), exd("mem", false, 5_000, 0), exd("later", false, 1_000, 0)];
+    let r = admit(&items, Ledger::default(), &cap(), &s);
+    assert!(ids(&r).is_empty(), "later 自己放得下 1000，但内存预留给新排头 mem");
+    assert_eq!(r.waiting_for["mem"], vec![Kind::Mem]);
+    assert_eq!(r.blocked_by.get("later").map(String::as_str), Some("mem"));
+}
+
+// CASE-QUEUE-11
+#[test]
+fn below_floor_only_zero_disk_runs() {
+    let s = SysSample { disk_free_mb: 40 * GB, ..sys() };
+    let items = vec![exd("a", false, 100, 100), exd("zero", false, 100, 0)];
+    let r = admit(&items, Ledger::default(), &cap(), &s);
+    assert_eq!(ids(&r), vec!["zero"]);
+    assert_eq!(r.waiting_for["a"], vec![Kind::DiskFull]);
+}

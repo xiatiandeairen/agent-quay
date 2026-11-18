@@ -23,7 +23,7 @@ pub struct RunArgs {
 pub fn nested(argv: &[String]) -> i32 {
     let Some((prog, args)) = argv.split_first() else { return 3 };
     let err = std::process::Command::new(prog).args(args).exec();
-    eprintln!("aq: 无法执行 {prog}：{err}");
+    eprintln!("aq: cannot execute {prog}: {err}");
     127
 }
 
@@ -36,10 +36,11 @@ struct Located {
     hash: Option<String>,
     fingerprint: Option<String>,
     profile_key: String,
+    worktree: Option<String>,
 }
 
 fn locate(ctx: &Ctx, a: &RunArgs) -> AppResult<Located> {
-    let cwd = std::env::current_dir().map_err(|e| AppError::Fatal(format!("读不到当前目录：{e}")))?;
+    let cwd = std::env::current_dir().map_err(|e| AppError::Fatal(format!("cannot read the current directory: {e}")))?;
     let cwd = cwd.to_string_lossy().into_owned();
     let repo = ctx.git.locate(&cwd).ok().flatten();
     let sig = signature(&a.argv);
@@ -51,7 +52,8 @@ fn locate(ctx: &Ctx, a: &RunArgs) -> AppResult<Located> {
         (Some(f), false) => Some(exec_hash(f, &rel, &a.argv)),
         _ => None,
     };
-    Ok(Located { profile_key: profile_key(&repo_key, &sig), cwd, hash, fingerprint: fp })
+    let worktree = repo.map(|r| r.toplevel);
+    Ok(Located { profile_key: profile_key(&repo_key, &sig), cwd, hash, fingerprint: fp, worktree })
 }
 
 /// 提交：返回 (执行 id, 是否复用)。先拿锁再提交，提交后再拉 runner：
@@ -72,15 +74,16 @@ fn submit(ctx: &Ctx, store: &mut Store, a: &RunArgs, l: &Located) -> AppResult<(
             argv: &a.argv,
             profile_key: &l.profile_key,
             fingerprint: l.fingerprint.as_deref(),
+            worktree: l.worktree.as_deref(),
             submitted_at: ctx.clock.now_ms(),
         };
         aq_store::insert_exec(c, &n)?;
         let lock = aq_sys::lock::try_lock_path(&ctx.dirs.lock_file(&id)).map_err(AppError::Fatal)?;
-        let lock = lock.ok_or_else(|| AppError::Fatal(format!("新执行的锁被占用：{id}")))?;
+        let lock = lock.ok_or_else(|| AppError::Fatal(format!("lock of the new execution is taken: {id}")))?;
         Ok((id, Some(lock)))
     })?;
     let Some(lock) = lock else { return Ok((id, true)) };
-    ctx.log_transition(&id, "", "queued", "提交");
+    ctx.log_transition(&id, "", "queued", "submitted");
     let fd = inheritable(&lock).map_err(AppError::Fatal)?;
     spawn::runner(ctx, &id, fd)?;
     Ok((id, false))
@@ -88,7 +91,7 @@ fn submit(ctx: &Ctx, store: &mut Store, a: &RunArgs, l: &Located) -> AppResult<(
 
 pub fn run(ctx: &Ctx, store: &mut Store, a: &RunArgs) -> AppResult<(Value, i32)> {
     if a.argv.is_empty() {
-        return Err(AppError::Usage("缺少要执行的命令：写成 aq run -- <命令> [参数...]".into()));
+        return Err(AppError::Usage("missing command: write aq run -- <command> [args...]".into()));
     }
     let l = locate(ctx, a)?;
     let (id, reused) = submit(ctx, store, a, &l)?;
@@ -101,7 +104,7 @@ pub fn run(ctx: &Ctx, store: &mut Store, a: &RunArgs) -> AppResult<(Value, i32)>
 pub fn wait_exec(ctx: &Ctx, store: &Store, id: &str, reused: bool, deadline: Instant) -> AppResult<(Value, i32)> {
     let mut round = 0;
     loop {
-        let e = aq_store::get_exec(store.conn(), id)?.ok_or_else(|| AppError::Usage(format!("执行不存在：{id}")))?;
+        let e = aq_store::get_exec(store.conn(), id)?.ok_or_else(|| AppError::Usage(format!("no such execution: {id}")))?;
         if e.status.is_terminal() || Instant::now() >= deadline {
             let soonest = super::status::soonest_free_s(ctx, store)?;
             return Ok((view::exec_json(ctx, &e, Some(reused), soonest), e.status.exit_code()));

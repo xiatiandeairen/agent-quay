@@ -162,7 +162,7 @@ fn huge_output_capped() {
     let len = std::fs::metadata(r.one()["log"].as_str().unwrap()).unwrap().len();
     assert!(len < 3 * 1024 * 1024, "日志截断：{len}");
     let text = std::fs::read_to_string(r.one()["log"].as_str().unwrap()).unwrap_or_default();
-    assert!(text.contains("[aq] 日志超过") || len < 1024 * 1024 + 70_000);
+    assert!(text.contains("[aq] log exceeded") || len < 1024 * 1024 + 70_000);
 }
 
 // CASE-RUN-10
@@ -192,4 +192,23 @@ fn sleep_not_counted_toward_timeout() {
     assert_eq!(s.status(), "ok", "睡眠时间不计入超时：{}", s.stdout);
     let wall = e.q_i64(&format!("SELECT finished_at - started_at FROM executions WHERE id='{}'", r.id()));
     assert!(wall >= 2 * 3600 * 1000, "*_at 仍记真实时间（含睡眠）：{wall}");
+}
+
+// CASE-CANCEL-10
+#[test]
+fn cancel_with_runner_gone_stops_command_itself() {
+    let e = Env::new();
+    let pids = e.path("pids");
+    let r = e.aq(&["run", "--wait", "0", "--", "fake-task", "--secs", "60", "--count", pids.to_str().unwrap()]);
+    assert!(until(10, || e.aq(&["status", &r.id()]).status() == "running"));
+    assert!(until(10, || pids.exists()));
+    kill9(&runner_pid(&r.id()).unwrap());
+    std::thread::sleep(Duration::from_millis(300));
+    let pid = std::fs::read_to_string(&pids).unwrap().trim().to_string();
+    let t = std::time::Instant::now();
+    let c = e.aq(&["cancel", &r.id()]);
+    assert_eq!((c.code, c.status()), (0, "cancelled"), "{}", c.stdout);
+    assert!(t.elapsed() < Duration::from_secs(6));
+    let gone = Command::new("kill").args(["-0", &pid]).stderr(std::process::Stdio::null()).status().map(|s| !s.success()).unwrap_or(true);
+    assert!(gone, "命令进程已被 cancel 终止");
 }

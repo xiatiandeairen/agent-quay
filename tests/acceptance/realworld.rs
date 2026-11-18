@@ -135,7 +135,8 @@ fn eight_sessions_peak() {
     }
     std::thread::sleep(Duration::from_millis(800));
     let human = e.aq(&["status", "--human"]).stdout;
-    assert!(human.contains("排队") || human.contains("运行"), "{human}");
+    // 匹配每个执行的明细行（「queued 1s  waiting for …」或「running 1s  process group …」），不是状态列或概况行
+    assert!(human.contains("  waiting for ") || human.contains("  process group "), "{human}");
     let mut max = 0;
     let deadline = Instant::now() + Duration::from_secs(60);
     while Instant::now() < deadline && e.q_i64("SELECT count(*) FROM executions WHERE status IN ('queued','running')") > 0 {
@@ -164,11 +165,11 @@ fn hung_build_times_out_and_queue_moves_on() {
 fn first_swift_uses_ai_then_measured_and_human_says_so() {
     let e = Env::new();
     let a = e.aq(&["run", "--", "fake-task", "--mem", "30M"]);
-    assert!(e.aq(&["status", &a.id(), "--human"]).stdout.contains("评估来自AI 评估"));
+    assert!(e.aq(&["status", &a.id(), "--human"]).stdout.contains("estimate from AI estimate"));
     let calls = e.ai_calls();
     let b = e.aq(&["run", "--", "fake-task", "--mem", "30M"]);
     assert_eq!(e.ai_calls(), calls);
-    assert!(e.aq(&["status", &b.id(), "--human"]).stdout.contains("评估来自实测"));
+    assert!(e.aq(&["status", &b.id(), "--human"]).stdout.contains("estimate from measurements"));
 }
 
 // CASE-REUSE-4

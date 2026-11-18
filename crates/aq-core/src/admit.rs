@@ -17,6 +17,8 @@ pub enum Kind {
     /// iOS 模拟器加 Android 实例已到台数上限（CASE-HOLD-12）。
     SimSlots,
     Disk,
+    /// 磁盘缺口大于运行中任务的磁盘记账之和：等它们结束也腾不出来，只有人删文件才行（CASE-QUEUE-8）。不预留给排头。
+    DiskFull,
     Net,
     Device(DeviceType),
     Account(String),
@@ -26,15 +28,16 @@ impl Kind {
     /// 给人看的「在等什么」。
     pub fn label(&self) -> String {
         match self {
-            Kind::Heavy => "重任务名额".into(),
-            Kind::Mem => "内存".into(),
-            Kind::MemPressure => "内存压力回落".into(),
-            Kind::ColdStart => "上一台模拟器启动完".into(),
-            Kind::SimSlots => "模拟器台数上限".into(),
-            Kind::Disk => "磁盘".into(),
-            Kind::Net => "下载名额".into(),
-            Kind::Device(t) => format!("设备 {t}"),
-            Kind::Account(a) => format!("账号 {a}"),
+            Kind::Heavy => "heavy slot".into(),
+            Kind::Mem => "memory".into(),
+            Kind::MemPressure => "memory pressure to ease".into(),
+            Kind::ColdStart => "previous simulator to finish booting".into(),
+            Kind::SimSlots => "simulator limit".into(),
+            Kind::Disk => "disk".into(),
+            Kind::DiskFull => "disk (needs cleanup)".into(),
+            Kind::Net => "download slot".into(),
+            Kind::Device(t) => format!("device {t}"),
+            Kind::Account(a) => format!("account {a}"),
         }
     }
 
@@ -47,6 +50,7 @@ impl Kind {
             Kind::ColdStart => "cold_start".into(),
             Kind::SimSlots => "sim_slots".into(),
             Kind::Disk => "disk".into(),
+            Kind::DiskFull => "disk_full".into(),
             Kind::Net => "net".into(),
             Kind::Device(t) => format!("device:{t}"),
             Kind::Account(a) => format!("account:{a}"),
@@ -238,6 +242,7 @@ fn touches(n: &Need, reserved: &BTreeSet<Kind>) -> bool {
         Kind::Mem | Kind::MemPressure => n.mem > 0,
         Kind::ColdStart | Kind::SimSlots => n.devices.iter().any(|t| cold_boot(*t)),
         Kind::Disk => n.disk > 0,
+        Kind::DiskFull => false,
         Kind::Net => n.net,
         Kind::Device(t) => n.devices.contains(t),
         Kind::Account(a) => n.accounts.contains(a),
@@ -264,35 +269,72 @@ fn commit(n: &Need, picked: &[Option<String>], l: &mut Ledger, cap: &Capacity) {
     }
 }
 
-/// 放行结果：谁能放行，以及每个没放行的项在等什么。
+/// 磁盘等不到时的账：需要多少、此刻剩余、保留底线、运行中任务的磁盘记账（MB）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiskGap {
+    pub need_mb: i64,
+    pub free_mb: i64,
+    pub floor_mb: i64,
+    pub running_mb: i64,
+}
+
+impl DiskGap {
+    /// 还差多少才放得下。
+    pub fn short_mb(&self) -> i64 {
+        self.need_mb - (self.free_mb - self.floor_mb - self.running_mb)
+    }
+}
+
+/// 放行结果：谁能放行，每个没放行的项在等什么；只因排头预留而没放行的项被谁挡住；磁盘等不到的项差多少。
 #[derive(Debug, Clone, Default)]
 pub struct AdmitResult {
     pub admitted: Vec<Admission>,
     pub waiting_for: HashMap<String, Vec<Kind>>,
+    /// 自己放得下、只因排头预留没放行：项 → 排头（CASE-QUEUE-3）。
+    pub blocked_by: HashMap<String, String>,
+    pub disk_full: HashMap<String, DiskGap>,
+}
+
+/// 磁盘缺口能不能靠等运行中的任务结束补上：缺口 ≤ 它们的磁盘记账之和（结束时记账释放）。
+fn disk_waitable(n: &Need, l: &Ledger, cap: &Capacity, sys: &SysSample) -> bool {
+    n.disk - disk_room(l, cap, sys) <= l.disk_acct_mb
 }
 
 /// 按到达顺序过一遍队列。`items` 必须已按到达时间排好。
+/// 第一个放不下的是排头：它缺的资源只留给它（CASE-QUEUE-3）。等不到的磁盘（disk_full）不预留——
+/// 磁盘写下去不会还，后来者等着也帮不了排头；排头只缺这一样时不占排头位置，由下一个放不下的接手（CASE-QUEUE-8～10）。
 pub fn admit(items: &[Item], mut l: Ledger, cap: &Capacity, sys: &SysSample) -> AdmitResult {
     let mut out = AdmitResult::default();
-    let mut reserved: Option<BTreeSet<Kind>> = None;
+    let mut reserved: Option<(String, BTreeSet<Kind>)> = None;
     for it in items {
         let n = need_of(&it.demand, cap);
-        let (miss, picked) = lacking(&n, &l, cap, sys);
-        let blocked_by_head = reserved.as_ref().is_some_and(|r| touches(&n, r));
-        if miss.is_empty() && !blocked_by_head {
+        let (mut miss, picked) = lacking(&n, &l, cap, sys);
+        let head_blocks = reserved.as_ref().filter(|(_, r)| touches(&n, r));
+        if miss.is_empty() && head_blocks.is_none() {
             commit(&n, &picked, &mut l, cap);
             let devices = n.devices.iter().copied().zip(picked).collect();
             out.admitted.push(Admission { id: it.id.clone(), devices });
             continue;
         }
-        let mut why: Vec<Kind> = miss.iter().cloned().collect();
-        if why.is_empty() {
-            if let Some(r) = &reserved {
-                why = r.iter().cloned().collect();
-            }
+        if miss.contains(&Kind::Disk) && !disk_waitable(&n, &l, cap, sys) {
+            miss.remove(&Kind::Disk);
+            miss.insert(Kind::DiskFull);
+            let gap = DiskGap { need_mb: n.disk, free_mb: sys.disk_free_mb, floor_mb: cap.disk_floor_mb, running_mb: l.disk_acct_mb };
+            out.disk_full.insert(it.id.clone(), gap);
         }
+        // 自己不缺：只能是被排头挡住，报排头占着的、这一项也要的那几类
+        let why: Vec<Kind> = match head_blocks {
+            Some((head, r)) if miss.is_empty() => {
+                out.blocked_by.insert(it.id.clone(), head.clone());
+                r.iter().filter(|k| touches(&n, &BTreeSet::from([(*k).clone()]))).cloned().collect()
+            }
+            _ => miss.iter().cloned().collect(),
+        };
         if reserved.is_none() {
-            reserved = Some(miss);
+            let keep: BTreeSet<Kind> = miss.into_iter().filter(|k| *k != Kind::DiskFull).collect();
+            if !keep.is_empty() {
+                reserved = Some((it.id.clone(), keep));
+            }
         }
         out.waiting_for.insert(it.id.clone(), why);
     }
@@ -303,20 +345,20 @@ pub fn admit(items: &[Item], mut l: Ledger, cap: &Capacity, sys: &SysSample) -> 
 pub fn unschedulable(d: &Demand, cap: &Capacity) -> Option<String> {
     let n = need_of(d, cap);
     if n.mem > cap.mem_mb {
-        return Some(format!("需要内存 {}MB，超过整机容量 {}MB", n.mem, cap.mem_mb));
+        return Some(format!("needs {}MB memory, more than the machine capacity {}MB", n.mem, cap.mem_mb));
     }
     let cold = n.devices.iter().filter(|t| cold_boot(**t)).count() as i64;
     if cold > cap.sim_slots {
-        return Some(format!("要 {cold} 台模拟器，超过台数上限 {}", cap.sim_slots));
+        return Some(format!("needs {cold} simulators, more than the limit {}", cap.sim_slots));
     }
     if n.heavy && cap.heavy_slots < 1 {
-        return Some("重任务名额为 0".into());
+        return Some("heavy slots are 0".into());
     }
     for t in DeviceType::ALL.iter().filter(|t| !t.is_virtual()) {
         let want = n.devices.iter().filter(|x| *x == t).count();
         let have = cap.real_devices(*t).len();
         if want > have {
-            return Some(format!("要 {want} 台 {t}，清单里只有 {have} 台"));
+            return Some(format!("needs {want} {t}, only {have} declared"));
         }
     }
     None

@@ -6,6 +6,7 @@ port=""; avd=""
 while [ $# -gt 0 ]; do case "$1" in -port) port="$2"; shift ;; -avd) avd="$2"; shift ;; esac; shift; done
 [ -e "$D/fail_boot" ] && { echo "fake emulator: boot failed" >&2; exit 1; }
 echo "$avd" > "$D/avd.last"
+ps -o nice= -p $$ | tr -d ' ' > "$D/nice.last"
 echo $$ > "$D/running/$port"
 # 只删自己的文件：同一端口上新起的实例可能已经写了新的 pid
 mine() { [ "$(cat "$D/running/$port" 2>/dev/null)" = "$$" ]; }
