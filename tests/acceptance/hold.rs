@@ -18,7 +18,7 @@ fn sim_created_named_and_booted() {
     let id = r.id();
     let d = &r.one()["devices"][0];
     assert_eq!(d["type"], "ios-sim");
-    assert_eq!(e.sims(), vec![format!("aq-{id}-1")]);
+    assert_eq!(e.sims(), vec![e.dev_name(&id, 1)]);
     assert!(created_log(&e).contains("iPhone 17 Pro com.apple.CoreSimulator.SimRuntime.iOS-27-2"), "机型为配置值、运行时为最新");
     assert!(std::fs::read_to_string(e.path("sim/calls.log")).unwrap().contains("boot"));
     assert!(e.state().join(format!("holds/{id}.used")).exists(), "CASE-HOLD-8");

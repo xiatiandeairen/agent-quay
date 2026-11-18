@@ -15,7 +15,7 @@ fn browser_opens_named_session() {
     let e = Env::new();
     let r = e.aq(&["hold", "browser"]);
     assert_eq!((r.code, r.status()), (0, "held"), "{}", r.stdout);
-    let name = format!("aq-{}-1", r.id());
+    let name = e.dev_name(&r.id(), 1);
     assert_eq!(r.one()["devices"][0], serde_json::json!({"type": "browser", "id": name}));
     assert_eq!(e.browsers(), std::slice::from_ref(&name));
     assert!(browser_calls(&e).contains(&format!("--session {name} open about:blank")), "{}", browser_calls(&e));
@@ -80,7 +80,7 @@ fn idle_reclaim_closes_session() {
 #[test]
 fn reconcile_closes_only_aq_orphans_never_user_session() {
     let e = Env::new();
-    std::fs::write(e.path("browser/sessions/aq-hd_gone-1"), "").unwrap();
+    std::fs::write(e.path("browser/sessions").join(e.dev_name("hd_gone", 1)), "").unwrap();
     std::fs::write(e.path("browser/sessions/mywork"), "").unwrap();
     e.aq(&["status"]);
     assert!(until(10, || e.browsers() == ["mywork"]), "残留被对账关掉，用户自己的会话不动：{:?}", e.browsers());
@@ -93,7 +93,7 @@ fn desktop_gives_session_name_to_many_agents() {
     let a = e.aq(&["hold", "desktop"]);
     let b = e.aq(&["hold", "desktop"]);
     assert_eq!((a.status(), b.status()), ("held", "held"), "{} {}", a.stdout, b.stdout);
-    assert_eq!(a.one()["devices"][0], serde_json::json!({"type": "desktop", "id": format!("aq-{}-1", a.id())}));
+    assert_eq!(a.one()["devices"][0], serde_json::json!({"type": "desktop", "id": e.dev_name(&a.id(), 1)}));
     e.aq(&["release", &a.id()]);
     assert!(until(10, || e.q_i64("SELECT count(*) FROM hold_devices") == 1), "还了就删行，只剩 b 的");
     assert!(!browser_calls(&e).contains(" open "), "desktop 不开浏览器会话：{}", browser_calls(&e));

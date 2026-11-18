@@ -32,7 +32,7 @@ fn set(v: &[Option<String>]) -> Vec<bool> {
     v.iter().map(Option::is_some).collect()
 }
 
-// CASE-STORE-1, CASE-EST-4
+// CASE-STORE-1, CASE-EST-3
 #[test]
 fn exec_fields_per_step() {
     let e = Env::with_config(&DEFAULT_CONFIG.replace("heavy_slots = 2", "heavy_slots = 1"));
@@ -51,9 +51,9 @@ fn exec_fields_per_step() {
         until(10, || set(&row(&e, &format!("SELECT heavy, mem_mb, disk_mb, uses_net, timeout_s FROM executions WHERE id='{}'", r.id())))
             .iter()
             .all(|x| *x)),
-        "CASE-EST-4 保守默认已写入"
+        "CASE-STORE-1 资源评估已写入"
     );
-    assert_eq!(e.q_i64("SELECT count(*) FROM profiles"), 0, "CASE-EST-4 profiles 不写");
+    assert_eq!(e.q_i64("SELECT count(*) FROM profiles"), 0, "CASE-EST-3 AI 失败不写 profiles");
     assert!(until(10, || e.aq(&["status", &r.id()]).status() == "running"));
     let v = set(&row(&e, &format!("SELECT started_at, pgid, pgid_started_at FROM executions WHERE id='{}'", r.id())));
     assert_eq!(v, [true, true, true], "CASE-STORE-1 放行");

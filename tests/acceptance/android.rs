@@ -21,7 +21,7 @@ fn android_emu_new_readonly_instance_on_aq_port() {
         calls.contains("-avd test_avd") && calls.contains("-read-only") && calls.contains("-no-window") && calls.contains("-port 5600"),
         "{calls}"
     );
-    assert_eq!(std::fs::read_to_string(e.state().join("emu/5600.name")).unwrap(), format!("aq-{}-1", r.id()));
+    assert_eq!(std::fs::read_to_string(e.state().join("emu/5600.name")).unwrap(), e.dev_name(&r.id(), 1));
     assert!(e.state().join(format!("holds/{}.used", r.id())).exists());
 }
 
@@ -100,8 +100,10 @@ fn kill_runner_mid_boot_no_residue() {
 #[test]
 fn reconcile_kills_only_aq_orphans_never_user_emulator() {
     let e = Env::new();
-    // 一个 aq 端口上的残留实例（没有对应的活动借用）
+    // 一个 aq 端口上的残留实例（本账本起的、没有对应的活动借用）
     std::fs::write(e.path("emu/running/5610"), "999999").unwrap();
+    std::fs::create_dir_all(e.state().join("emu")).unwrap();
+    std::fs::write(e.state().join("emu/5610.name"), e.dev_name("hd_gone", 1)).unwrap();
     e.aq(&["status"]);
     assert!(until(10, || e.emus().is_empty()), "残留被对账删掉");
     let adb = std::fs::read_to_string(e.path("emu/adb.log")).unwrap_or_default();

@@ -22,7 +22,7 @@ fn concurrent_same_signature_one_ai_call() {
 
 // CASE-EST-3
 #[test]
-fn bad_ai_falls_back_to_default_and_retries_next_time() {
+fn bad_ai_falls_back_to_first_seen_and_retries_next_time() {
     for mode in ["garbage", "huge", "fail", "slow"] {
         let e = Env::new();
         e.env("AQ_T_AI_TIMEOUT_S", "1");
@@ -31,7 +31,7 @@ fn bad_ai_falls_back_to_default_and_retries_next_time() {
         let r = e.aq(&["run", "--wait", "30", "--", "fake-task", "--secs", "0"]);
         assert_eq!(r.status(), "ok", "{mode}: {}", r.stdout);
         assert!(t.elapsed().as_secs() < 15, "CASE-EST-3 多等不超过时限");
-        assert_eq!(mem_of(&e, &r.id()), 28 * 1024 / 4, "{mode}: 保守默认 = 容量 1/4");
+        assert_eq!(mem_of(&e, &r.id()), 1024, "{mode}: 按首次见到记账（没有历史时 1G）");
         assert_eq!(e.q_i64("SELECT count(*) FROM profiles"), 0, "CASE-EST-1 失败不写 profiles");
     }
 }
@@ -49,9 +49,9 @@ fn one_measurement_replaces_ai() {
     assert_eq!(mem_of(&e, &r.id()), (peak as f64 * 1.2).ceil() as i64, "1 次实测：峰值 × 1.2");
 }
 
-// CASE-EST-4
+// CASE-EST-13
 #[test]
-fn no_history_default_when_ai_unavailable() {
+fn first_seen_without_history_is_light() {
     let e = Env::new();
     e.set_ai("fail");
     let r = e.aq(&["run", "--wait", "0", "--", "fake-task", "--secs", "0"]);
@@ -60,21 +60,41 @@ fn no_history_default_when_ai_unavailable() {
         .db()
         .query_row(&format!("SELECT heavy, timeout_s FROM executions WHERE id='{}'", r.id()), [], |x| Ok((x.get(0)?, x.get(1)?)))
         .unwrap();
-    assert_eq!((heavy, timeout), (1, 7200));
-    assert_eq!(mem_of(&e, &r.id()), 7168);
+    assert_eq!((heavy, timeout), (0, 7200), "按轻任务，超时取上限");
+    assert_eq!(mem_of(&e, &r.id()), 1024);
 }
 
-// CASE-EST-4
+// CASE-EST-13
 #[test]
-fn with_history_default_uses_machine_p90() {
+fn first_seen_with_history_uses_machine_median() {
     let e = Env::new();
-    for m in ["60M", "80M"] {
+    for m in ["60M", "80M", "200M"] {
         e.aq(&["run", "--", "fake-task", "--mem", m]);
     }
     e.set_ai("fail");
     let r = e.aq(&["run", "--", "sh", "-c", "true"]);
-    let p90 = e.q_i64("SELECT max(peak_mem_mb) FROM executions WHERE argv LIKE '%fake-task%'");
-    assert_eq!(mem_of(&e, &r.id()), p90, "全机实测峰值 p90");
+    let median = e.q_i64("SELECT peak_mem_mb FROM executions WHERE argv LIKE '%fake-task%' ORDER BY peak_mem_mb LIMIT 1 OFFSET 1");
+    assert_eq!(mem_of(&e, &r.id()), median.max(256), "全机实测峰值中位数（不低于 256MB）");
+}
+
+// CASE-EST-13
+#[test]
+fn first_seen_starts_without_waiting_for_slow_ai() {
+    let e = Env::new();
+    e.env("AQ_T_AI_BLOCKING", "0"); // 正式行为
+    e.env("AQ_T_AI_TIMEOUT_S", "30");
+    e.set_ai("slow");
+    let r = e.aq(&["run", "--wait", "0", "--", "fake-task", "--secs", "1"]);
+    assert!(until(10, || e.q_i64(&format!("SELECT started_at IS NOT NULL FROM executions WHERE id='{}'", r.id())) == 1));
+    let (sub, start, heavy): (i64, i64, i64) = e
+        .db()
+        .query_row(&format!("SELECT submitted_at, started_at, heavy FROM executions WHERE id='{}'", r.id()), [], |x| {
+            Ok((x.get(0)?, x.get(1)?, x.get(2)?))
+        })
+        .unwrap();
+    assert!(start - sub < 1000, "从提交到开始 {} 毫秒，AI 要 30 秒也不等", start - sub);
+    assert_eq!(heavy, 0, "按轻任务放行");
+    assert!(until(10, || e.ai_calls() >= 1), "AI 在后台照样评估一次");
 }
 
 // CASE-EST-8
@@ -152,11 +172,11 @@ fn run_under_claude_process(e: &Env, envs: &[(&str, &str)]) -> String {
 
 // CASE-EST-2
 #[test]
-fn unverified_or_unknown_agent_uses_default_without_ai() {
+fn unverified_or_unknown_agent_uses_first_seen_without_ai() {
     let e = Env::new();
     let id = run_under_claude_process(&e, &[("CURSOR_AGENT", "1")]);
     assert_eq!(e.ai_calls(), 0, "Cursor 不在已验证表：不调任何 AI CLI，即使链上有名为 claude 的进程");
-    assert!(e.aq(&["status", &id, "--human"]).stdout.contains("评估来自保守默认"));
+    assert!(e.aq(&["status", &id, "--human"]).stdout.contains("评估来自首次见到（按轻任务）"));
     let f = Env::new();
     run_under_claude_process(&f, &[("CLAUDECODE", "1")]);
     assert_eq!(f.ai_calls(), 1, "认出 Claude Code：调它的 CLI 评估");
