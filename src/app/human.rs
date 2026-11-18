@@ -41,14 +41,15 @@ fn runner_state(ctx: &Ctx, id: &str) -> &'static str {
 }
 
 /// 评估来自哪里：提交前同类命令已有实测 → 实测；否则有 AI 缓存 → AI 评估；否则保守默认。
-fn source(store: &Store, e: &ExecRow) -> &'static str {
+pub(super) fn source(store: &Store, e: &ExecRow) -> aq_core::estimate::Source {
+    use aq_core::estimate::Source;
     let c = store.conn();
     if aq_store::measured_before(c, &e.profile_key, e.submitted_at).unwrap_or(0) > 0 {
-        aq_core::estimate::Source::Measured.label()
+        Source::Measured
     } else if aq_store::get_profile(c, &e.profile_key).ok().flatten().is_some() {
-        aq_core::estimate::Source::Ai.label()
+        Source::Ai
     } else {
-        aq_core::estimate::Source::Default.label()
+        Source::Default
     }
 }
 
@@ -67,7 +68,7 @@ fn exec_line(ctx: &Ctx, store: &Store, e: &ExecRow, waiting: &std::collections::
             r.disk_mb,
             r.uses_net,
             e.timeout_s.unwrap_or(0),
-            source(store, e)
+            source(store, e).label()
         );
     } else {
         s.push_str("\n    资源评估中");

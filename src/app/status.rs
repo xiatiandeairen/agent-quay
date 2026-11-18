@@ -40,7 +40,7 @@ pub fn summary(ctx: &Ctx, store: &Store) -> AppResult<Value> {
     Ok(json!({
         "running": running,
         "queued": queued,
-        "cpu_pct": sys.cpu_pct,
+        "cpu_pct": ctx.sys.cpu_pct(),
         "mem_pct": pct(acct.max(used), cap.mem_mb),
         "disk_pct": pct(sys.disk_total_mb - sys.disk_free_mb, sys.disk_total_mb),
         "phone_pct": pct(phones_out, phones_total),

@@ -37,7 +37,6 @@ pub struct SysSample {
     pub mem_avail_mb: i64,
     pub disk_total_mb: i64,
     pub disk_free_mb: i64,
-    pub cpu_pct: i64,
 }
 
 /// 一个排队项要的东西。

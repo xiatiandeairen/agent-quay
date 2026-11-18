@@ -46,7 +46,7 @@ pub fn sysres_contract(s: &dyn SysRes) {
     let x = s.sample();
     assert!(x.mem_total_mb > 0 && (0..=x.mem_total_mb).contains(&x.mem_avail_mb));
     assert!(x.disk_total_mb > 0 && (0..=x.disk_total_mb).contains(&x.disk_free_mb));
-    assert!((0..=100).contains(&x.cpu_pct));
+    assert!((0..=100).contains(&s.cpu_pct()));
 }
 
 pub fn locks_contract<L: Locks>(l: &L) {
@@ -102,7 +102,7 @@ pub fn git_contract(w: &dyn GitWorld) {
 
 contract!(clock, super::clock_contract, real = aq_sys::clock::RealClock, fake = super::fakes::FakeClock::new());
 contract!(procs, super::procs_contract, real = aq_sys::procs::RealProcs, fake = super::fakes::FakeProcs::with_self());
-contract!(sysres, super::sysres_contract, real = aq_sys::sysres::RealSys { disk_path: std::env::temp_dir() }, fake = super::fakes::FakeSys);
+contract!(sysres, super::sysres_contract, real = aq_sys::sysres::RealSys::new(std::env::temp_dir()), fake = super::fakes::FakeSys);
 contract!(locks, super::locks_contract, real = super::fakes::real_locks(), fake = super::fakes::FakeLocks::default());
 contract!(simulator, super::sim_contract, real = super::fakes::simctl_adapter(), fake = super::fakes::FakeSim::default());
 contract!(ai_cli, super::ai_contract, real = super::fakes::ai_command(), fake = super::fakes::FakeAi);

@@ -20,6 +20,7 @@ pub mod procs;
 pub mod sim;
 pub mod spawn;
 pub mod sysres;
+pub mod term;
 
 pub(crate) fn procs_zeroed<T: Copy>() -> T {
     // SAFETY: 只用于 libc 的纯数据结构体（全零是合法值）。

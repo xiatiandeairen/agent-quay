@@ -67,7 +67,13 @@ fn user_cmd(cmd: Cmd) -> i32 {
     let s = &mut store;
     let (r, human) = match cmd {
         Cmd::Run { fresh, wait, human, cmd } => (one(app::run::run(&ctx, s, &app::run::RunArgs { fresh, wait_s: wait, argv: cmd })), human),
-        Cmd::Status { ids, wait, human } if ids.is_empty() => {
+        Cmd::Status { top: true, .. } => {
+            return match app::top::run(&ctx, s) {
+                Ok(c) => c,
+                Err(e) => emit(Err(e)),
+            };
+        }
+        Cmd::Status { ids, wait, human, .. } if ids.is_empty() => {
             if human {
                 return match app::human::overview(&ctx, s) {
                     Ok((t, c)) => {
@@ -80,7 +86,9 @@ fn user_cmd(cmd: Cmd) -> i32 {
             let _ = wait; // 不带 id 时 --wait 无意义，忽略
             (app::status::overview(&ctx, s), false)
         }
-        Cmd::Status { ids, wait, human } => (app::status::require_ids(&ids).and_then(|_| app::status::by_ids(&ctx, s, &ids, wait)), human),
+        Cmd::Status { ids, wait, human, .. } => {
+            (app::status::require_ids(&ids).and_then(|_| app::status::by_ids(&ctx, s, &ids, wait)), human)
+        }
         Cmd::Cancel { id, human } => (one(app::release::cancel(&ctx, s, &id)), human),
         Cmd::Hold { devices, accounts, wait, human } => {
             (one(app::hold::hold(&ctx, s, &app::hold::HoldArgs { devices, accounts, wait_s: wait })), human)

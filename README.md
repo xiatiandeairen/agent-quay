@@ -4,6 +4,10 @@ English · [简体中文](README.zh-CN.md)
 
 A local queue and device lender for parallel AI agent sessions on one Mac.
 
+![Three agents call aq: two identical builds run once and share the result, the tests wait for a free heavy slot, then two agents each borrow their own fresh simulator](docs/demo/demo.gif)
+
+<sub>Real aq calls; `build.sh` and `test.sh` stand in for heavy builds. The ~40 s spent creating the simulators is cut. Re-record with `docs/demo/record.sh`.</sub>
+
 When several agent sessions (Claude Code, Codex, …) work on the same machine, each one decides on its own to build, test or boot a simulator. They pile up, the Mac thrashes, and simulators and test accounts get overwritten by each other. `aq` is a single command the agents call instead:
 
 | Problem | What aq does |
@@ -57,6 +61,7 @@ aq status <id> --wait 60            # keep waiting on a queued or running task
 aq hold ios-sim --account alice     # borrow a fresh simulator plus a test account
 aq release <hold-id>                # give them back
 aq status --human                   # everything on this machine, readable
+aq status --top                     # live dashboard, like htop (Ctrl-C to quit)
 ```
 
 Each command prints one JSON line per object; act on its `status` (`queued`, `running`, `ok`, `failed`, `held`, `rejected`, …). `--human` adds the details: what a task waits for and where its estimate came from.

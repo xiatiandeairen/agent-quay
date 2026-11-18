@@ -24,7 +24,7 @@ fn hold(id: &str, status: HoldStatus, devices: Vec<DeviceType>) -> HoldView {
 }
 fn probes() -> Probes {
     Probes {
-        sys: SysSample { mem_total_mb: 36_000, mem_avail_mb: 30_000, disk_total_mb: 1_000_000, disk_free_mb: 500_000, cpu_pct: 1 },
+        sys: SysSample { mem_total_mb: 36_000, mem_avail_mb: 30_000, disk_total_mb: 1_000_000, disk_free_mb: 500_000 },
         ..Probes::default()
     }
 }

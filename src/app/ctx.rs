@@ -83,7 +83,7 @@ impl Ctx {
         let (tuning, limits) = Tuning::from_env();
         let exe = std::env::current_exe().map_err(|e| AppError::Fatal(format!("找不到 aq 可执行文件：{e}")))?;
         let ctx = Ctx {
-            sys: RealSys { disk_path: dirs.state.clone() },
+            sys: RealSys::new(dirs.state.clone()),
             locks: LockDir { dir: dirs.locks.clone() },
             git: RealGit { budget: Duration::from_secs(30) },
             dirs,

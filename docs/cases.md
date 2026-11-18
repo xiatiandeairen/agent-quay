@@ -111,11 +111,12 @@
 
 | 编号 | 场景 | 预期效果 | 验证 |
 |---|---|---|---|
-| CASE-STATUS-1 | `aq status` 不带 id | 第一行是全机概况，恰好 7 个字段，数值与系统差 5 个百分点内；之后列出全机所有活动的执行和未归还的借用 | 集成 |
+| CASE-STATUS-1 | `aq status` 不带 id | 第一行是全机概况，恰好 7 个字段，数值与系统差 5 个百分点内（CPU 是实际使用率，不是平均负载）；之后列出全机所有活动的执行和未归还的借用 | 单元；集成 |
 | CASE-STATUS-2 | `aq status <id1> <id2> --wait 30` | 等到都结束或超时；每个对象一行；退出码取最大 | 集成 |
 | CASE-STATUS-3 | 所有命令的输出 | 每个对象一行 JSON，字段只在适用时出现；退出码：ok/held/released/reclaimed 为 0，failed/timeout/interrupted/cancelled 为 1，queued/running/waiting 为 2，rejected 为 3；cancel、release 被接受即 0 | 集成 |
 | CASE-STATUS-4 | 任意命令加 `--human` | 输出易读文本，含在等什么、评估来源、借用者、状态目录；退出码与不加相同 | 集成 |
 | CASE-STATUS-5 | 配置文件有未知字段或写错一行 | 任意 aq 命令返回 rejected usage，消息带行号 | 单元；集成 |
+| CASE-STATUS-6 | `aq status --top` | 英文仪表盘：CPU、内存、磁盘的占用条和重任务名额条，每个活动的执行、借用各一行（状态、时长、命令或设备、在等什么）；在终端里每 0.5 秒原地重画，Ctrl-C 退出；输出不是终端时只画一帧，退出码 0；与 id、`--wait`、`--human` 同用返回 rejected usage | 单元；集成 |
 
 ## 故障与恢复
 

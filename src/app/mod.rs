@@ -14,4 +14,5 @@ pub mod runner;
 pub mod simgc;
 pub mod spawn;
 pub mod status;
+pub mod top;
 pub mod view;

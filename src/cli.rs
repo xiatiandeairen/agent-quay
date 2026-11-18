@@ -25,13 +25,16 @@ pub enum Cmd {
         #[arg(last = true)]
         cmd: Vec<String>,
     },
-    /// 查看全局或指定对象；--wait 等到全部结束或超时
+    /// 查看全局或指定对象；--wait 等到全部结束或超时；--top 全屏仪表盘
     Status {
         ids: Vec<String>,
         #[arg(long)]
         wait: Option<u64>,
         #[arg(long)]
         human: bool,
+        /// 英文仪表盘，终端里每 0.5 秒刷新，Ctrl-C 退出；输出不是终端时只打印一帧
+        #[arg(long, conflicts_with_all = ["ids", "wait", "human"])]
+        top: bool,
     },
     /// 撤销排队中或运行中的执行
     Cancel {

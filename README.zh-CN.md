@@ -4,6 +4,10 @@
 
 给同一台 Mac 上并行工作的多个 AI agent 会话用的本机排队和设备借还工具。
 
+![三个 agent 调用 aq：两次相同的编译只跑一次、共用结果，测试排队等重任务名额，最后两个 agent 各借到一台新模拟器](docs/demo/demo.gif)
+
+<sub>aq 调用都是真实的，`build.sh` 和 `test.sh` 代替重型编译；创建模拟器的约 40 秒已剪掉。用 `docs/demo/record.sh` 可重录。</sub>
+
 多个 agent 会话（Claude Code、Codex 等）在同一台机器上干活时，各自决定什么时候编译、跑测试、开模拟器，结果一起挤上来，机器被拖垮，模拟器和测试账号互相覆盖。`aq` 是 agent 改用的一条命令：
 
 | 问题 | aq 怎么做 |
@@ -57,6 +61,7 @@ aq status <id> --wait 60            # 接着等排队中或运行中的任务
 aq hold ios-sim --account alice     # 借一台新模拟器和一个测试账号
 aq release <借用id>                 # 归还
 aq status --human                   # 全机情况，给人看
+aq status --top                     # 实时仪表盘，类似 htop（Ctrl-C 退出）
 ```
 
 每条命令每个对象输出一行 JSON，按 `status`（`queued`、`running`、`ok`、`failed`、`held`、`rejected` 等）决定下一步。加 `--human` 看细节：任务在等什么、资源估算从哪来。

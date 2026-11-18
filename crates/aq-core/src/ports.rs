@@ -49,6 +49,8 @@ pub trait Procs {
 
 pub trait SysRes {
     fn sample(&self) -> SysSample;
+    /// 整机 CPU 使用率（0–100）。
+    fn cpu_pct(&self) -> i64;
 }
 
 /// 模拟器：按名字新建并启动、关机删除、列出 aq- 开头的。

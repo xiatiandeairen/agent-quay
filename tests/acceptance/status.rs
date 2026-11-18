@@ -18,6 +18,7 @@ fn overview_has_seven_fields_and_lists_everything() {
     assert_eq!(keys, ["running", "queued", "cpu_pct", "mem_pct", "disk_pct", "phone_pct", "sims"]);
     assert_eq!(first["phone_pct"], 100);
     assert_eq!(first["disk_pct"], 50, "覆盖文件里 1000000 剩 500000");
+    assert_eq!(first["cpu_pct"], 20, "覆盖文件里的 CPU");
     let ids: Vec<&str> = s.lines[1..].iter().map(|l| l["id"].as_str().unwrap()).collect();
     assert_eq!(ids, [r.id().as_str(), h.id().as_str()]);
     e.aq(&["cancel", &r.id()]);
@@ -138,4 +139,21 @@ fn bad_config_line_is_usage_with_line_number() {
         assert_eq!(r.code, 3);
         assert!(r.one()["message"].as_str().unwrap().contains("line 2"), "{}", r.stdout);
     }
+}
+
+// CASE-STATUS-6
+#[test]
+fn top_draws_one_frame_when_not_a_terminal() {
+    let e = Env::new();
+    let q = e.aq(&["run", "--wait", "0", "--", "fake-task", "--secs", "5"]);
+    let t = e.aq(&["status", "--top"]);
+    assert_eq!(t.code, 0);
+    assert!(!t.stdout.contains('\x1b'), "非终端不着色、不重画：{:?}", t.stdout);
+    assert!(t.stdout.starts_with("aq · running") && t.stdout.contains("HEAVY") && t.stdout.contains("TASKS"), "{}", t.stdout);
+    assert!(t.stdout.contains("fake-task --secs 5") && t.stdout.contains("nothing borrowed"), "{}", t.stdout);
+    for args in [&["status", "--top", &q.id()][..], &["status", "--top", "--human"][..], &["status", "--top", "--wait", "5"][..]] {
+        let r = e.aq(args);
+        assert_eq!((r.code, r.one()["reason"].as_str()), (3, Some("usage")), "{args:?}");
+    }
+    assert_eq!(e.aq(&["cancel", &q.id()]).code, 0);
 }

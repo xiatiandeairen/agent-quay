@@ -4,7 +4,7 @@ fn cap() -> Capacity {
     Capacity { ios_devices: vec!["phone1".into()], ..Capacity::default() }
 }
 fn sys() -> SysSample {
-    SysSample { mem_total_mb: 36_000, mem_avail_mb: 30_000, disk_total_mb: 1_000_000, disk_free_mb: 500_000, cpu_pct: 10 }
+    SysSample { mem_total_mb: 36_000, mem_avail_mb: 30_000, disk_total_mb: 1_000_000, disk_free_mb: 500_000 }
 }
 fn ex(id: &str, heavy: bool, mem: i64) -> Item {
     Item { id: id.into(), demand: Demand::Exec(Resources { heavy, mem_mb: mem, disk_mb: 0, uses_net: false }) }
