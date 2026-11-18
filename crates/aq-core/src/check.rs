@@ -108,7 +108,7 @@ fn ledger(s: &Snapshot, p: &Probes, actions: &[Action], cap: &Capacity) -> Ledge
         let freed = reclaimed.contains(&d.hold_id.as_str());
         if d.dtype.is_virtual() {
             if !(freed && d.device.is_none()) {
-                l.add_sim(cap.sim_mem_mb(d.dtype), d.device.is_some());
+                l.add_sim(d.dtype, cap.sim_mem_mb(d.dtype), d.device.is_some());
             }
         } else if let (Some(dev), false) = (&d.device, freed) {
             l.devices.insert(dev.clone());

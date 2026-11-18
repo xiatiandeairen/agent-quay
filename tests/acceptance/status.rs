@@ -157,3 +157,30 @@ fn top_draws_one_frame_when_not_a_terminal() {
     }
     assert_eq!(e.aq(&["cancel", &q.id()]).code, 0);
 }
+
+// CASE-STATUS-3
+#[test]
+fn reused_only_in_run_output() {
+    let e = Env::new();
+    let r = e.aq(&["run", "--wait", "0", "--", "fake-task", "--secs", "3"]);
+    assert_eq!(r.one()["reused"], false, "aq run 的返回带 reused");
+    let s = e.aq(&["status", &r.id()]);
+    assert!(s.one().get("reused").is_none(), "status 不带 reused：{}", s.stdout);
+    let all = e.aq(&["status"]);
+    assert!(all.lines[1..].iter().all(|l| l.get("reused").is_none()), "{}", all.stdout);
+    let c = e.aq(&["cancel", &r.id()]);
+    assert!(c.one().get("reused").is_none(), "cancel 不带 reused：{}", c.stdout);
+}
+
+// 表外：aq.log 的删除记录按设备类型措辞（排查用，不是需求行为）
+#[test]
+fn deletion_note_names_the_device_type() {
+    let e = Env::new();
+    let b = e.aq(&["hold", "browser"]);
+    e.aq(&["release", &b.id()]);
+    assert!(until(10, || {
+        e.aq(&["status"]);
+        e.aq_log().contains("浏览器会话")
+    }));
+    assert!(!e.aq_log().contains("模拟器"), "浏览器会话不叫模拟器：{}", e.aq_log());
+}

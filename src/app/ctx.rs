@@ -32,6 +32,8 @@ pub struct Tuning {
     pub heavy_window_ms: i64,
     /// 只给验收测试：首次见到的命令先同步等 AI 评估再放行（旧行为），让测试能用假 AI 的输出设定首次资源。正式运行为假。
     pub ai_blocking: bool,
+    /// 内存压力挡住多久后在输出里加说明（CASE-QUEUE-5）。正式值 10 分钟。
+    pub pressure_warn_ms: i64,
 }
 
 fn env_i64(k: &str) -> Option<i64> {
@@ -57,6 +59,7 @@ impl Tuning {
             default_wait_s: 100,
             heavy_window_ms: env_i64("AQ_T_HEAVY_WINDOW_S").unwrap_or(10) * 1000,
             ai_blocking: env_i64("AQ_T_AI_BLOCKING") == Some(1),
+            pressure_warn_ms: env_i64("AQ_T_PRESSURE_WARN_S").unwrap_or(600) * 1000,
         };
         (t, lim)
     }
@@ -84,7 +87,7 @@ pub struct Ctx {
 impl Ctx {
     pub fn open(by: &'static str) -> Result<(Ctx, Store), AppError> {
         let dirs = Dirs::resolve().map_err(AppError::Fatal)?;
-        let config = Config::load(&dirs.config_file).map_err(AppError::Usage)?;
+        let config = Config::load(&dirs.config_file, aq_sys::sysres::physical_mem_mb()).map_err(AppError::Usage)?;
         dirs.ensure().map_err(AppError::Fatal)?;
         let store = Store::open(&dirs.db).map_err(AppError::from)?;
         let (tuning, limits) = Tuning::from_env();
@@ -172,6 +175,17 @@ impl Ctx {
         match aq_core::devname::owner(name, &self.ledger, self.default_ledger) {
             aq_core::devname::Owner::Mine(h) => Some(h),
             aq_core::devname::Owner::Other => None,
+        }
+    }
+
+    /// 记下内存压力从什么时候开始：状态目录 `mem-pressure-since` 的修改时间就是开始时刻。
+    /// 每次检查时更新：紧张且文件不在就建，不紧张就删（CASE-QUEUE-5）。
+    pub fn track_pressure(&self, tight: bool) {
+        let f = self.dirs.state.join("mem-pressure-since");
+        if !tight {
+            let _ = std::fs::remove_file(&f); // 本来就不在也无妨
+        } else if !f.exists() {
+            let _ = std::fs::write(&f, b""); // 写不进去只是少了「持续多久」
         }
     }
 

@@ -137,7 +137,7 @@ flowchart LR
 | id、哈希 | ulid、blake3 | — |
 | 进程 | libc（只在 aq-sys） | setsid、killpg、proc_pidinfo、sysctl(KERN_PROCARGS2) |
 | 识别调用方 agent | is-ai-agent | 按环境变量识别 agent 类型 |
-| 系统指标 | sysinfo | 内存、磁盘、进程 RSS 与启动时间 |
+| 系统指标 | libc（sysctl、host_statistics64、libproc） | 内存压力与可用百分比、换出页数、磁盘、进程 RSS、物理内存占用与启动时间 |
 | 带超时等子进程 | wait-timeout | AI 评估限时 |
 | 文件锁 | 标准库 `File::try_lock` | runner 锁 |
 | git、模拟器 | 调用 `git`、`xcrun simctl`、`xcrun devicectl`、`emulator`、`adb` | 没有覆盖子模块递归 diff 和模拟器管理的库 |
@@ -313,6 +313,19 @@ aq release hd_19c2
 
 C 是配置的容量，a 是各任务记账量，u 是当前实际用量，F 是系统实际可用量，floor 是保留底线。
 
+**内存怎么量、什么时候不放行、模拟器最多几台**（CASE-QUEUE-5～7、CASE-HOLD-12）。起因：agent-verify 2026-11-17 实测，内存占用已 85% 时 aq 一次放出 3 台新模拟器，峰值同时 7 台、占用 94%，机器明显变慢（一行 python 约 50 秒），而当时 memory_pressure 报的空闲最低 29%、压力仍为正常——慢主要来自 3 台同时冷启动抢 CPU 和磁盘，不是内存用尽。
+
+| 项 | 做法 | 理由 | 代价 |
+| --- | --- | --- | --- |
+| 容量 C | 没配置时取物理内存的 3/4（36G → 27G）；配置了以配置为准 | 原先写死 28G，16G、64G 的机器都不对 | 3/4 是假设，验证见下 |
+| 实际可用 F | 内核给 jetsam 用的空闲百分比 `kern.memorystatus_level` × 物理内存 | 与 `memory_pressure` 报的同一个数，人和 aq 看同一个读数 | 和以前的 sysinfo 读数不同，`mem_pct` 会变 |
+| 压力闸门 | `kern.memorystatus_vm_pressure_level` 为 warn、critical，或距上次采样换出超过 64MB（只比 2 分钟内的上一次读数，读数存在状态目录的 `vm-swapouts`）时，要内存的一律不放行，`waiting_for` 报 `mem_pressure` | 余量公式只看数量，换页已经发生时还会继续放；压力等级是系统自己的判断 | 别的程序造成的压力也会挡住 aq 的任务；64MB 是假设 |
+| 冷启动串行 | iOS 模拟器、Android 实例同一时间只建一台，其余 waiting，`waiting_for` 报 `cold_start` | 3 台同时冷启动是 RT-3-2 卡顿的主因，agent-device 也会因此 3/3 失败 | 连借 3 台时最后一台多等前两台的启动时间（每台约 30 秒） |
+| 模拟器台数上限 | 同时存在的 iOS 模拟器加 Android 实例（含还在建、已归还还没删完的）不超过 `sim_slots`；没配置时物理内存每 8G 一台，至少 1 台（36G → 4、16G → 2、64G → 8）。浏览器会话不算。到上限的借用 waiting，`waiting_for` 报 `sim_slots`；一次就要超过上限的 rejected | 每台模拟器实际占多少内存量不准（按进程树加 phys_footprint 单台得 7.8–12G，单台启动时系统空闲只降约 1%），按台数管比按内存记账可靠；批 2 同时 4 台、占用 80% 人没感觉卡，批 3 到 7 台、94% 明显变慢；3 台合计约占 14G，即每台约 4.5G | 每 8G 一台是假设：在 16G、64G 的机器上各连借到上限，看压力是否进 warn、人是否感到卡；只数本账本的设备，别的账本和用户自己开的模拟器不算 |
+| 压力等待上限 | 被内存压力挡住时继续排队，不失败；返回里带 `mem_pressure_s`（已持续多久，开始时刻记在状态目录 `mem-pressure-since`，压力回落即删）；超过 10 分钟再加 `message`，说明压力来自 aq 以外的程序、关掉占内存的程序后会自动开始 | 失败返回会让 agent 重试或放弃，排队 + 说清原因对人打扰最少；压力是机器层面的，aq 无法替人解决 | 一直不回落时任务会一直排着；10 分钟是假设 |
+
+假设怎么验证：在本机用真 simctl 连借 3 台、再连借 4 + 1 台，记录每次放行时的压力等级、空闲百分比、换出增量和同时在建的台数，与改前的 0.3.0 对比（证据在 agent-verify 测试目录 `a3/`）；之后按真实负载回放（CASE-LOAD-1）时压力不进 warn。
+
 ### 5.4 设备与账号
 
 一组借用里可以有多台设备和多个账号，整组借到或整组等待，不占其中任何一项（CASE-HOLD-4）。账号可以登在组内任一设备上，怎么登由 agent 决定。
@@ -397,7 +410,9 @@ aq release <借用id>
 | --- | --- | --- |
 | `id` | 总是 | 传给 status、cancel |
 | `status` | 总是 | 决定下一步 |
-| `reused` | 总是 | 是否共用了别人的同一次执行 |
+| `reused` | 只在 `aq run` 的返回里 | 这次提交是否接上了别人的同一次执行；status、cancel 不输出（它们没有「这次提交」可言） |
+| `mem_pressure_s` `message` | 在等内存压力回落 | 压力已持续的秒数；超过 10 分钟另加 `message` 说明，仍在排队（CASE-QUEUE-5） |
+| `waiting_for` | queued、waiting 且查得到原因 | 在等哪类资源：`heavy`、`mem`、`mem_pressure`、`cold_start`、`sim_slots`、`disk`、`net`、`device:<类型>`、`account:<名字>`（CASE-QUEUE-5、CASE-QUEUE-6） |
 | `retry_after_s` | queued、running | 建议多少秒后再查，10–300，只是轮询建议 |
 | `exit_code` | failed | 命令退出码 |
 | `log` | 命令已开始运行 | 输出日志路径 |
@@ -467,14 +482,15 @@ cancel、release 的退出码只表示请求是否被接受：接受即 0。stat
 
 ```toml
 heavy_slots = 2          # 同时最多几个重任务
-mem = "28G"              # aq 可分配的内存
+mem = "28G"              # aq 可分配的内存；不写时取物理内存的 3/4
 disk_floor = "50G"       # 磁盘至少保留这么多
 net_slots = 3            # 同时下载的任务数
+sim_slots = 4            # iOS 模拟器加 Android 实例最多几台；不写时物理内存每 8G 一台
 ai_cli = "auto"          # auto：按已验证 agent 表；也可写死一条命令
 
 [ios-sim]
 model = "iPhone 17 Pro"  # 新建用的机型
-mem = "3G"               # 每台记账内存，有实测后用实测
+mem = "3G"               # 每台记账内存
 
 [android-emu]
 avd = "Pixel_8_API_35"   # aq 专用的 AVD
@@ -669,7 +685,8 @@ stateDiagram-v2
 | 变量 | 作用 | 正式值 |
 | --- | --- | --- |
 | `AQ_SIMCTL` / `AQ_DEVICECTL` / `AQ_EMULATOR` / `AQ_ADB` / `AQ_AGENT_BROWSER` | 换成 `tests/support/` 下的假脚本 | 系统工具 |
-| `AQ_SYS_OVERRIDE` | JSON 文件，覆盖可用内存、剩余磁盘、CPU | 不设 |
+| `AQ_SYS_OVERRIDE` | JSON 文件，覆盖物理内存、可用内存、剩余磁盘、CPU、内存压力（`pressure`：normal/warn/critical）、换出（`swapping`） | 不设 |
+| `AQ_T_PRESSURE_WARN_S` | 内存压力挡住多久后加说明 | 600 |
 | `AQ_T_POLL_MS` | 读库、检查的间隔上限 | 1000 |
 | `AQ_T_IDLE_RECLAIM_S` | 闲置多久收回 | 7200 |
 | `AQ_T_TIMEOUT_MIN_S` / `AQ_T_TIMEOUT_MAX_S` | 超时上下限 | 1800 / 7200 |
@@ -710,7 +727,7 @@ stateDiagram-v2
 
 | 局限 | 影响 | 缓解 |
 | --- | --- | --- |
-| 容量默认值固定（28G 内存、2 个重任务、50G 磁盘底线） | 内存小的机器可能过载，内存大的用不满 | 在配置里按本机改；实际余量检查兜底 |
+| 重任务名额、磁盘底线默认值固定（2 个、50G） | 核数少的机器可能过载 | 在配置里按本机改；内存容量已按物理内存推出 |
 | 只有 Claude Code、Codex 在已验证表里 | 其他 agent 的命令没有 AI 评估缓存，第一次执行按首次见到放行；借用者认不出时只按闲置收回 | 配置 `ai_cli`；新 agent 验证后进表 |
 | 用 setsid 脱离进程组的子进程 | 命令结束时不等它；它的父进程退出后用量统计不到（CASE-RUN-10） | — |
 | 嵌套的 agent（一个 agent 启动另一个） | 环境变量同时带两种 agent 的标记，可能认成外层 agent | — |
@@ -726,5 +743,6 @@ stateDiagram-v2
 | 排队复杂时请 AI 给出顺序 | 排队时间占比明显上升，或 agent 数量翻倍 |
 | 事件表；`--human` 显示卡在哪类资源 | 出现一次靠日志查不出原因的卡住 |
 | runner 世代号、孤儿命令接管 | 实测出现 busy 报错或卡死 |
-| 每类命令保留最少实测、账本损坏重建、敏感信息脱敏、模拟器按实测内存记账 | 对应问题出现 |
-| 容量默认值按本机内存和核数自动算出 | 对外分发前 |
+| 每类命令保留最少实测、账本损坏重建、敏感信息脱敏 | 对应问题出现 |
+| 模拟器按实测内存记账（先要找到可信的量法） | 台数上限在不同内存的机器上不够用 |
+| 重任务名额按本机核数自动算出 | 对外分发前 |

@@ -95,6 +95,9 @@ fn kind_en(k: &Kind) -> String {
     match k {
         Kind::Heavy => "heavy slot".into(),
         Kind::Mem => "memory".into(),
+        Kind::MemPressure => "memory pressure".into(),
+        Kind::ColdStart => "previous simulator boot".into(),
+        Kind::SimSlots => "simulator limit".into(),
         Kind::Disk => "disk".into(),
         Kind::Net => "download slot".into(),
         Kind::Device(t) => t.to_string(),

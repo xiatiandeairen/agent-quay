@@ -104,7 +104,7 @@ pub fn wait_exec(ctx: &Ctx, store: &Store, id: &str, reused: bool, deadline: Ins
         let e = aq_store::get_exec(store.conn(), id)?.ok_or_else(|| AppError::Usage(format!("执行不存在：{id}")))?;
         if e.status.is_terminal() || Instant::now() >= deadline {
             let soonest = super::status::soonest_free_s(ctx, store)?;
-            return Ok((view::exec_json(ctx, &e, reused, soonest), e.status.exit_code()));
+            return Ok((view::exec_json(ctx, &e, Some(reused), soonest), e.status.exit_code()));
         }
         ctx.pace(round, Some(deadline));
         round += 1;

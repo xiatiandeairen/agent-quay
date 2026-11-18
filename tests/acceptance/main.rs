@@ -7,6 +7,7 @@ mod estimate;
 mod faults;
 mod hold;
 mod ledgers;
+mod memory;
 mod queue;
 mod realdev;
 mod realworld;

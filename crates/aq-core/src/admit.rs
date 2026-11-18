@@ -1,4 +1,4 @@
-//! 放行：资源记账 + 先来先服务 + 排头保留。
+//! 放行：资源记账 + 模拟器台数上限 + 内存压力闸门 + 模拟器冷启动串行 + 先来先服务 + 排头保留。
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -10,6 +10,12 @@ use crate::model::{DeviceType, HoldRequest, Resources};
 pub enum Kind {
     Heavy,
     Mem,
+    /// 系统报内存压力（warn、critical）或正在往交换区换出：要内存的一律不放行（CASE-QUEUE-5）。
+    MemPressure,
+    /// 同一时间只冷启动一台 iOS 模拟器或 Android 实例（CASE-QUEUE-6）。
+    ColdStart,
+    /// iOS 模拟器加 Android 实例已到台数上限（CASE-HOLD-12）。
+    SimSlots,
     Disk,
     Net,
     Device(DeviceType),
@@ -22,21 +28,64 @@ impl Kind {
         match self {
             Kind::Heavy => "重任务名额".into(),
             Kind::Mem => "内存".into(),
+            Kind::MemPressure => "内存压力回落".into(),
+            Kind::ColdStart => "上一台模拟器启动完".into(),
+            Kind::SimSlots => "模拟器台数上限".into(),
             Kind::Disk => "磁盘".into(),
             Kind::Net => "下载名额".into(),
             Kind::Device(t) => format!("设备 {t}"),
             Kind::Account(a) => format!("账号 {a}"),
         }
     }
+
+    /// 对外 JSON 的 `waiting_for` 取值（CASE-QUEUE-5、CASE-QUEUE-6）。
+    pub fn code(&self) -> String {
+        match self {
+            Kind::Heavy => "heavy".into(),
+            Kind::Mem => "mem".into(),
+            Kind::MemPressure => "mem_pressure".into(),
+            Kind::ColdStart => "cold_start".into(),
+            Kind::SimSlots => "sim_slots".into(),
+            Kind::Disk => "disk".into(),
+            Kind::Net => "net".into(),
+            Kind::Device(t) => format!("device:{t}"),
+            Kind::Account(a) => format!("account:{a}"),
+        }
+    }
+}
+
+/// 系统报的内存压力（macOS `kern.memorystatus_vm_pressure_level`：1 正常、2 warn、4 critical）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Pressure {
+    #[default]
+    Normal,
+    Warn,
+    Critical,
 }
 
 /// 系统实测值。
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct SysSample {
     pub mem_total_mb: i64,
+    /// 内核判断的可用内存（macOS：`kern.memorystatus_level` 空闲百分比 × 物理内存）。
     pub mem_avail_mb: i64,
     pub disk_total_mb: i64,
     pub disk_free_mb: i64,
+    pub pressure: Pressure,
+    /// 距上次采样正在往交换区换出（换出页数增量超过阈值）。
+    pub swapping: bool,
+}
+
+impl SysSample {
+    /// 内存吃紧：压力不是正常，或正在换出。
+    pub fn mem_tight(&self) -> bool {
+        self.pressure != Pressure::Normal || self.swapping
+    }
+}
+
+/// 冷启动要串行的设备：iOS 模拟器、Android 实例（建一台要 30 秒以上、占满 CPU 和磁盘）。浏览器会话 2 秒内起来，不算。
+pub fn cold_boot(t: DeviceType) -> bool {
+    matches!(t, DeviceType::IosSim | DeviceType::AndroidEmu)
 }
 
 /// 一个排队项要的东西。
@@ -57,6 +106,10 @@ pub struct Ledger {
     pub net: i64,
     pub devices: HashSet<String>,
     pub accounts: HashSet<String>,
+    /// 已分配、还在创建的 iOS 模拟器和 Android 实例台数。
+    pub creating: i64,
+    /// 已分配的 iOS 模拟器和 Android 实例台数（含创建中、已归还还没删完的）。
+    pub sims: i64,
 }
 
 impl Ledger {
@@ -67,11 +120,13 @@ impl Ledger {
         self.mem_unused_mb += (r.mem_mb - used_mem_mb).max(0);
         self.disk_acct_mb += r.disk_mb;
     }
-    /// 模拟器按配置内存记账；已建好的视为已用满，创建中的视为还没用。
-    pub fn add_sim(&mut self, mem_mb: i64, created: bool) {
+    /// 虚拟设备按记账内存（实测或配置）记账；已建好的视为已用满，创建中的视为还没用，并计入冷启动台数。
+    pub fn add_sim(&mut self, t: DeviceType, mem_mb: i64, created: bool) {
         self.mem_acct_mb += mem_mb;
+        self.sims += i64::from(cold_boot(t));
         if !created {
             self.mem_unused_mb += mem_mb;
+            self.creating += i64::from(cold_boot(t));
         }
     }
 }
@@ -135,6 +190,16 @@ fn lacking(n: &Need, l: &Ledger, cap: &Capacity, sys: &SysSample) -> (BTreeSet<K
     if n.mem > 0 && n.mem > mem_room(l, cap, sys) {
         miss.insert(Kind::Mem);
     }
+    if n.mem > 0 && sys.mem_tight() {
+        miss.insert(Kind::MemPressure);
+    }
+    let cold = n.devices.iter().filter(|t| cold_boot(**t)).count() as i64;
+    if cold > 0 && l.creating > 0 {
+        miss.insert(Kind::ColdStart);
+    }
+    if cold > 0 && l.sims + cold > cap.sim_slots {
+        miss.insert(Kind::SimSlots);
+    }
     if n.disk > 0 && n.disk > disk_room(l, cap, sys) {
         miss.insert(Kind::Disk);
     }
@@ -170,7 +235,8 @@ fn lacking(n: &Need, l: &Ledger, cap: &Capacity, sys: &SysSample) -> (BTreeSet<K
 fn touches(n: &Need, reserved: &BTreeSet<Kind>) -> bool {
     reserved.iter().any(|k| match k {
         Kind::Heavy => n.heavy,
-        Kind::Mem => n.mem > 0,
+        Kind::Mem | Kind::MemPressure => n.mem > 0,
+        Kind::ColdStart | Kind::SimSlots => n.devices.iter().any(|t| cold_boot(*t)),
         Kind::Disk => n.disk > 0,
         Kind::Net => n.net,
         Kind::Device(t) => n.devices.contains(t),
@@ -186,7 +252,7 @@ fn commit(n: &Need, picked: &[Option<String>], l: &mut Ledger, cap: &Capacity) {
         if let Some(d) = d {
             l.devices.insert(d.clone());
         } else if t.is_virtual() {
-            l.add_sim(cap.sim_mem_mb(*t), false);
+            l.add_sim(*t, cap.sim_mem_mb(*t), false);
         }
     }
     if n.devices.is_empty() {
@@ -238,6 +304,10 @@ pub fn unschedulable(d: &Demand, cap: &Capacity) -> Option<String> {
     let n = need_of(d, cap);
     if n.mem > cap.mem_mb {
         return Some(format!("需要内存 {}MB，超过整机容量 {}MB", n.mem, cap.mem_mb));
+    }
+    let cold = n.devices.iter().filter(|t| cold_boot(**t)).count() as i64;
+    if cold > cap.sim_slots {
+        return Some(format!("要 {cold} 台模拟器，超过台数上限 {}", cap.sim_slots));
     }
     if n.heavy && cap.heavy_slots < 1 {
         return Some("重任务名额为 0".into());

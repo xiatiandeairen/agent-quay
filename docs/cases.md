@@ -64,6 +64,9 @@
 | CASE-QUEUE-2 | 记账内存之和超过容量；aq 以外的程序占掉大量内存；磁盘低于底线；同时下载的任务名额已满 | 新任务排队等待，不失败；条件恢复后开始 | 单元；集成 |
 | CASE-QUEUE-3 | 排头在等某种资源，后来的任务分别要这种资源、不要这种资源（含编译和借用混排） | 不要的可以先开始；要的不插队，排头缺的资源不被后来者占走 | 单元；集成 |
 | CASE-QUEUE-4 | 排头在等资源 | 最晚在当前运行任务的最长超时内开始 | 集成 |
+| CASE-QUEUE-5 | 账面和实际余量都够；系统内存压力为 warn 或 critical；或距上次采样换出超过 64MB；压力回落 | 前者放行；后两者要内存的执行和借用都不放行（queued/waiting），`aq status <id>` 带 `waiting_for: ["mem_pressure"]` 和 `retry_after_s`，不要内存的（真机）照常借；回落后自动放行。被压力挡住时另带 `mem_pressure_s`（已持续秒数）；超过 10 分钟仍排队、不失败，另加 `message` 说明压力来自 aq 以外的程序 | 单元；集成 |
+| CASE-QUEUE-6 | 同时来 3 个借 ios-sim 的请求（每台建 2 秒以上） | 任何时刻最多一台 iOS 模拟器或 Android 实例在冷启动；其余 waiting，带 `waiting_for: ["cold_start"]` 和 `retry_after_s`；三台最终都借到。浏览器会话不受限 | 单元；集成；真 simctl：实机 |
+| CASE-QUEUE-7 | 配置里没写 `mem`、`sim_slots`，物理内存 36G、16G、64G；写了；读不到物理内存 | 内存容量为物理内存 3/4（36G → 27G，16G → 12G），模拟器台数上限每 8G 一台（4、2、8 台，至少 1 台）；写了以配置为准；读不到时 28G、4 台 | 单元；集成 |
 
 ## 借用
 
@@ -79,6 +82,7 @@
 | CASE-HOLD-8 | `--wait 5` 返回 waiting 后再查 | 创建期间仍为 waiting 且内存已预留；建好后为 held，设备 id 已回填，闲置计时文件已建 | 集成 |
 | CASE-HOLD-9 | 同一台机器上两个账本（不同 `XDG_STATE_HOME`）各借 1 台 ios-sim 和 1 个浏览器会话，两边反复对账；账本 A 还有一台建好后崩溃没记账的半成品 | 两边借出的设备都还在；A 的半成品被 A 删掉；各自归还后各自删掉 | 单元；集成；真 simctl 两个实例：实机 |
 | CASE-HOLD-10 | 机器上有旧格式名字（不带账本标识）的残留模拟器 `aq-hd_x-1` | 非默认账本不动；默认账本（`~/.local/state/aq`）对账时删掉 | 单元；集成 |
+| CASE-HOLD-12 | 台数上限 N（`sim_slots`）；已有 N 台 iOS 模拟器或 Android 实例（含还没删完的）时再借一台；一次就要超过 N 台；借浏览器会话 | 前者 waiting，`waiting_for: ["sim_slots"]`，带 `retry_after_s`，归还一台并删完后放行；一次要超过 N 台的 rejected unschedulable；浏览器会话不计台数 | 单元；集成；真 simctl 连借 4 + 1 台：实机 |
 | CASE-HOLD-11 | 借出的模拟器在 held 期间被 aq 以外删掉 | `aq status <id>` 仍为 held，多出 `missing` 列出已不在的设备 id；aq.log 记一笔 | 集成 |
 
 ## 真机
@@ -118,7 +122,7 @@
 |---|---|---|---|
 | CASE-STATUS-1 | `aq status` 不带 id | 第一行是全机概况，恰好 7 个字段，数值与系统差 5 个百分点内（CPU 是实际使用率，不是平均负载）；之后列出全机所有活动的执行和未归还的借用 | 单元；集成 |
 | CASE-STATUS-2 | `aq status <id1> <id2> --wait 30` | 等到都结束或超时；每个对象一行；退出码取最大 | 集成 |
-| CASE-STATUS-3 | 所有命令的输出 | 每个对象一行 JSON，字段只在适用时出现；退出码：ok/held/released/reclaimed 为 0，failed/timeout/interrupted/cancelled 为 1，queued/running/waiting 为 2，rejected 为 3；cancel、release 被接受即 0 | 集成 |
+| CASE-STATUS-3 | 所有命令的输出 | 每个对象一行 JSON，字段只在适用时出现（`reused` 只在 `aq run` 的返回里有，status、cancel 不带）；退出码：ok/held/released/reclaimed 为 0，failed/timeout/interrupted/cancelled 为 1，queued/running/waiting 为 2，rejected 为 3；cancel、release 被接受即 0 | 集成 |
 | CASE-STATUS-4 | 任意命令加 `--human` | 输出易读文本，含在等什么、评估来源、借用者、状态目录；退出码与不加相同 | 集成 |
 | CASE-STATUS-5 | 配置文件有未知字段或写错一行 | 任意 aq 命令返回 rejected usage，消息带行号 | 单元；集成 |
 | CASE-STATUS-6 | `aq status --top` | 英文仪表盘：CPU、内存、磁盘的占用条和重任务名额条，每个活动的执行、借用各一行（状态、时长、命令或设备、在等什么）；在终端里每 0.5 秒原地重画，Ctrl-C 退出；输出不是终端时只画一帧，退出码 0；与 id、`--wait`、`--human` 同用返回 rejected usage | 单元；集成 |

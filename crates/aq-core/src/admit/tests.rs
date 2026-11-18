@@ -4,7 +4,7 @@ fn cap() -> Capacity {
     Capacity { ios_devices: vec!["phone1".into()], ..Capacity::default() }
 }
 fn sys() -> SysSample {
-    SysSample { mem_total_mb: 36_000, mem_avail_mb: 30_000, disk_total_mb: 1_000_000, disk_free_mb: 500_000 }
+    SysSample { mem_total_mb: 36_000, mem_avail_mb: 30_000, disk_total_mb: 1_000_000, disk_free_mb: 500_000, ..SysSample::default() }
 }
 fn ex(id: &str, heavy: bool, mem: i64) -> Item {
     Item { id: id.into(), demand: Demand::Exec(Resources { heavy, mem_mb: mem, disk_mb: 0, uses_net: false }) }
@@ -164,4 +164,55 @@ mod props {
             prop_assert!(accts <= 1);
         }
     }
+}
+
+// CASE-QUEUE-5
+#[test]
+fn memory_pressure_blocks_memory_users_only() {
+    let items = vec![ex("e", false, 100), hold("s", vec![DeviceType::IosSim], &[]), hold("p", vec![DeviceType::IosDevice], &[])];
+    for s in [
+        SysSample { pressure: Pressure::Warn, ..sys() },
+        SysSample { pressure: Pressure::Critical, ..sys() },
+        SysSample { swapping: true, ..sys() },
+    ] {
+        let r = admit(&items, Ledger::default(), &cap(), &s);
+        assert_eq!(ids(&r), vec!["p"], "只放不要内存的真机");
+        assert_eq!(r.waiting_for["e"], vec![Kind::MemPressure]);
+        assert_eq!(r.waiting_for["s"], vec![Kind::MemPressure]);
+    }
+    assert_eq!(ids(&admit(&items, Ledger::default(), &cap(), &sys())), vec!["e", "s", "p"], "压力正常、余量够：都放行");
+}
+
+// CASE-QUEUE-6
+#[test]
+fn one_cold_boot_at_a_time() {
+    let items: Vec<Item> = (0..3).map(|i| hold(&format!("s{i}"), vec![DeviceType::IosSim], &[])).collect();
+    let r = admit(&items, Ledger::default(), &cap(), &sys());
+    assert_eq!(ids(&r), vec!["s0"], "同一轮只放一台冷启动");
+    assert_eq!(r.waiting_for["s1"], vec![Kind::ColdStart]);
+    let mut l = Ledger::default();
+    l.add_sim(DeviceType::IosSim, 3072, true);
+    assert_eq!(ids(&admit(&items, l, &cap(), &sys())), vec!["s0"], "已建好的不挡");
+    let mut l = Ledger::default();
+    l.add_sim(DeviceType::AndroidEmu, 4096, false);
+    let r = admit(&[hold("b", vec![DeviceType::Browser], &[]), hold("s0", vec![DeviceType::IosSim], &[])], l, &cap(), &sys());
+    assert_eq!(ids(&r), vec!["b"], "Android 实例在建时浏览器会话照借，iOS 模拟器排队");
+}
+
+// CASE-HOLD-12
+#[test]
+fn simulator_count_limit() {
+    let c = Capacity { sim_slots: 2, ..cap() };
+    let mut l = Ledger::default();
+    l.add_sim(DeviceType::IosSim, 3072, true);
+    l.add_sim(DeviceType::AndroidEmu, 4096, true);
+    l.add_sim(DeviceType::Browser, 1024, true);
+    let items = vec![hold("s", vec![DeviceType::IosSim], &[]), hold("b", vec![DeviceType::Browser], &[])];
+    let r = admit(&items, l.clone(), &c, &sys());
+    assert_eq!(ids(&r), vec!["b"], "浏览器会话不算台数");
+    assert_eq!(r.waiting_for["s"], vec![Kind::SimSlots]);
+    let mut one = Ledger::default();
+    one.add_sim(DeviceType::IosSim, 3072, true);
+    assert_eq!(ids(&admit(&items, one, &c, &sys())), vec!["s", "b"], "还差一台：放行");
+    assert!(unschedulable(&hold("x", vec![DeviceType::IosSim; 3], &[]).demand, &c).is_some(), "一次要的超过上限：拒绝");
 }

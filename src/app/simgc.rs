@@ -40,22 +40,34 @@ pub fn run(ctx: &Ctx, store: &mut Store) -> AppResult<()> {
         }
         for (hold_id, seq, t, udid) in rows {
             let r = ctx.virtual_backend(t).map_or(Ok(()), |b| b.delete(&udid));
+            let what = device_noun(t);
             if let Err(e) = r {
-                ctx.log_note(&hold_id, &format!("删除模拟器 {udid} 失败：{e}；下次对账再删"));
+                ctx.log_note(&hold_id, &format!("删除{what} {udid} 失败：{e}；下次对账再删"));
             }
             store.tx(|c| aq_store::delete_device_row(c, &hold_id, seq))?;
-            ctx.log_note(&hold_id, &format!("模拟器 {udid} 已删除，内存释放"));
+            ctx.log_note(&hold_id, &format!("{what} {udid} 已删除，记账内存释放"));
         }
     }
     for t in [DeviceType::IosSim, DeviceType::AndroidEmu, DeviceType::Browser] {
         if let Some(b) = ctx.virtual_backend(t) {
-            reconcile(ctx, store, b.as_ref())?;
+            reconcile(ctx, store, t, b.as_ref())?;
         }
     }
     Ok(())
 }
 
-fn reconcile(ctx: &Ctx, store: &mut Store, sim: &dyn Simulator) -> AppResult<()> {
+/// 日志里怎么称呼这类设备（CASE-RECLAIM-1）。
+fn device_noun(t: DeviceType) -> &'static str {
+    match t {
+        DeviceType::IosSim => "模拟器",
+        DeviceType::AndroidEmu => "Android 实例",
+        DeviceType::Browser => "浏览器会话",
+        DeviceType::Desktop => "桌面会话",
+        DeviceType::IosDevice | DeviceType::AndroidDevice => "真机",
+    }
+}
+
+fn reconcile(ctx: &Ctx, store: &mut Store, t: DeviceType, sim: &dyn Simulator) -> AppResult<()> {
     let Ok(list) = sim.list_aq() else { return Ok(()) }; // 没装 Xcode 等：没有模拟器可对账
     let holds = aq_store::active_holds(store.conn())?;
     let waiting: HashSet<String> = holds.iter().filter(|h| h.status == HoldStatus::Waiting).map(|h| h.id.clone()).collect();
@@ -67,7 +79,7 @@ fn reconcile(ctx: &Ctx, store: &mut Store, sim: &dyn Simulator) -> AppResult<()>
         let keep = waiting.contains(&hold_id) || (held.contains(&hold_id) && known.contains(&udid));
         if !keep {
             let _ = sim.delete(&udid); // 删失败下次对账再删
-            ctx.log_note(&hold_id, &format!("对账：删除残留模拟器 {name}"));
+            ctx.log_note(&hold_id, &format!("对账：删除残留的{} {name}", device_noun(t)));
         }
     }
     Ok(())

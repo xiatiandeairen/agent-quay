@@ -25,6 +25,7 @@ fn mtime_ms(p: &std::path::Path) -> Option<i64> {
 
 fn probe(ctx: &Ctx, s: &Snapshot, self_id: Option<&str>, guards: &mut HashMap<String, File>) -> AppResult<Probes> {
     let mut p = Probes { sys: ctx.sys.sample(), ..Probes::default() };
+    ctx.track_pressure(p.sys.mem_tight());
     let mut try_runner = |id: &str| -> AppResult<bool> {
         if Some(id) == self_id {
             return Ok(false);

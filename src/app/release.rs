@@ -42,5 +42,5 @@ pub fn cancel(ctx: &Ctx, store: &mut Store, id: &str) -> AppResult<(Value, i32)>
         }
         Ok::<_, AppError>(aq_store::get_exec(c, id)?.unwrap_or(e))
     })?;
-    Ok((view::exec_json(ctx, &e, false, None), 0))
+    Ok((view::exec_json(ctx, &e, None, None), 0))
 }

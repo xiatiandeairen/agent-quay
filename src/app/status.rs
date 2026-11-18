@@ -50,22 +50,26 @@ pub fn summary(ctx: &Ctx, store: &Store) -> AppResult<Value> {
 
 /// 不带 id：第一行全局概况，之后每行一个活动的执行或未归还的借用。
 pub fn overview(ctx: &Ctx, store: &mut Store) -> AppResult<(Vec<Value>, i32)> {
-    check::check(ctx, store)?;
+    let waiting = check::check(ctx, store)?.plan.admit.waiting_for;
+    let note = pressure_note(ctx);
     let mut out = vec![summary(ctx, store)?];
     let soonest = soonest_free_s(ctx, store)?;
     for e in aq_store::active_execs(store.conn())? {
-        out.push(view::exec_json(ctx, &e, false, soonest));
+        out.push(view::exec_json(ctx, &e, None, soonest));
     }
     for h in aq_store::active_holds(store.conn())? {
         let devs = view::hold_devices(store.conn(), &h.id)?;
         out.push(view::hold_json(&h, &devs));
+    }
+    for v in out.iter_mut().skip(1) {
+        view::annotate_waiting(v, &waiting, &note);
     }
     Ok((out, 0))
 }
 
 fn one(ctx: &Ctx, store: &Store, id: &str, soonest: Option<i64>) -> AppResult<(Value, i32, bool)> {
     if let Some(e) = aq_store::get_exec(store.conn(), id)? {
-        return Ok((view::exec_json(ctx, &e, false, soonest), e.status.exit_code(), e.status.is_terminal()));
+        return Ok((view::exec_json(ctx, &e, None, soonest), e.status.exit_code(), e.status.is_terminal()));
     }
     if let Some(h) = aq_store::get_hold(store.conn(), id)? {
         let devs = view::hold_devices(store.conn(), id)?;
@@ -80,6 +84,16 @@ fn one(ctx: &Ctx, store: &Store, id: &str, soonest: Option<i64>) -> AppResult<(V
         return Ok((v, h.status.exit_code(), h.status.is_settled()));
     }
     Ok((view::rejected_with_id(id, "usage", "id 不存在（或已被保留策略清理）"), 3, true))
+}
+
+/// 内存压力持续了多久（读状态目录的开始时间，检查时已更新）。
+fn pressure_note(ctx: &Ctx) -> view::PressureNote {
+    let since = std::fs::metadata(ctx.dirs.state.join("mem-pressure-since"))
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .map(|d| d.as_secs() as i64);
+    view::PressureNote { for_s: since, warn_after_s: ctx.tuning.pressure_warn_ms / 1000 }
 }
 
 /// held 的借用里已经不存在的虚拟设备（被外部删掉、模拟器服务被重置）。借用状态不变，由调用方决定归还重借（CASE-HOLD-11）。
@@ -108,7 +122,7 @@ fn missing_devices(ctx: &Ctx, store: &Store, hold_id: &str) -> AppResult<Vec<Str
 
 /// 带 id：逐个查；带 --wait 每隔 poll 查一次，直到全部结束或到期。退出码取最大。
 pub fn by_ids(ctx: &Ctx, store: &mut Store, ids: &[String], wait_s: Option<u64>) -> AppResult<(Vec<Value>, i32)> {
-    check::check(ctx, store)?;
+    let mut waiting = check::check(ctx, store)?.plan.admit.waiting_for;
     let deadline = Instant::now() + Duration::from_secs(wait_s.unwrap_or(0));
     let mut round = 0;
     loop {
@@ -116,8 +130,16 @@ pub fn by_ids(ctx: &Ctx, store: &mut Store, ids: &[String], wait_s: Option<u64>)
         let rows = ids.iter().map(|id| one(ctx, store, id, soonest)).collect::<AppResult<Vec<_>>>()?;
         let done = rows.iter().all(|r| r.2);
         if done || Instant::now() >= deadline {
+            if !done && round > 0 {
+                waiting = check::check(ctx, store)?.plan.admit.waiting_for; // 等了一阵还没结束：按最新一次检查报在等什么
+            }
             let code = rows.iter().map(|r| r.1).max().unwrap_or(0);
-            return Ok((rows.into_iter().map(|r| r.0).collect(), code));
+            let mut out: Vec<Value> = rows.into_iter().map(|r| r.0).collect();
+            let note = pressure_note(ctx);
+            for v in &mut out {
+                view::annotate_waiting(v, &waiting, &note);
+            }
+            return Ok((out, code));
         }
         ctx.pace(round, Some(deadline));
         round += 1;

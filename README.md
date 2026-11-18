@@ -12,8 +12,8 @@ When several agent sessions (Claude Code, Codex, …) work on the same machine, 
 
 | Problem | What aq does |
 | --- | --- |
-| Several builds at once swap the machine to death | Admits heavy tasks by free memory and disk, at most 2 at a time by default |
-| Agents fight over the same simulator, device or test account | Lends each one to a single session; simulators are fresh copies, deleted on return |
+| Several builds at once swap the machine to death | Admits heavy tasks by free memory and disk, at most 2 at a time by default; holds everything that needs memory while macOS reports memory pressure |
+| Agents fight over the same simulator, device or test account | Lends each one to a single session; simulators are fresh copies, deleted on return, booted one at a time, at most one per 8 GB of RAM by default |
 | The same code and command run twice | A run already in progress is shared; both callers get its result |
 | Agents poll in loops waiting for results | One command waits and returns a structured status |
 
@@ -74,7 +74,8 @@ Optional. `~/.config/aq/config.toml` (or `$XDG_CONFIG_HOME/aq/config.toml`):
 
 ```toml
 heavy_slots = 2          # heavy tasks at the same time
-mem = "28G"              # memory aq may hand out
+mem = "28G"              # memory aq may hand out; default 3/4 of RAM
+sim_slots = 4            # iOS simulators + Android emulators at once; default one per 8 GB of RAM
 disk_floor = "50G"       # keep at least this much disk free
 ai_cli = "auto"          # or a fixed command, e.g. "claude -p"
 

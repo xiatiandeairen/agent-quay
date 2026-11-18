@@ -21,6 +21,7 @@ struct Raw {
     mem: Option<String>,
     disk_floor: Option<String>,
     net_slots: Option<i64>,
+    sim_slots: Option<i64>,
     ai_cli: Option<String>,
     #[serde(rename = "ios-sim")]
     ios_sim: Option<Sim>,
@@ -81,33 +82,36 @@ fn size(v: &Option<String>, default: i64, key: &str) -> Result<i64, String> {
 }
 
 impl Config {
-    pub fn load(path: &Path) -> Result<Config, String> {
+    /// `physical_mb`：本机物理内存，没配置 `mem` 时据此推出容量（CASE-QUEUE-7）。
+    pub fn load(path: &Path, physical_mb: i64) -> Result<Config, String> {
         let text = match std::fs::read_to_string(path) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(e) => return Err(format!("读取 {} 失败：{e}", path.display())),
         };
-        Self::parse(&text).map_err(|e| format!("{}：{e}", path.display()))
+        Self::parse_for(&text, physical_mb).map_err(|e| format!("{}：{e}", path.display()))
     }
 
-    pub fn parse(text: &str) -> Result<Config, String> {
+    /// 物理内存未知（0）时容量退回内置默认值。
+    pub fn parse_for(text: &str, physical_mb: i64) -> Result<Config, String> {
         let raw: Raw = toml::from_str(text).map_err(|e| e.to_string().replace('\n', " "))?;
         let d = Capacity::default();
         let (sim_model, sim_mem) = raw.ios_sim.map(|s| (s.model, s.mem)).unwrap_or((None, None));
         let (avd, emu_mem) = raw.android_emu.map(|s| (s.avd, s.mem)).unwrap_or((None, None));
         let cap = Capacity {
             heavy_slots: raw.heavy_slots.unwrap_or(d.heavy_slots),
-            mem_mb: size(&raw.mem, d.mem_mb, "mem")?,
+            mem_mb: size(&raw.mem, aq_core::capacity::default_mem_mb(physical_mb), "mem")?,
             disk_floor_mb: size(&raw.disk_floor, d.disk_floor_mb, "disk_floor")?,
             net_slots: raw.net_slots.unwrap_or(d.net_slots),
+            sim_slots: raw.sim_slots.unwrap_or_else(|| aq_core::capacity::default_sim_slots(physical_mb)),
             ios_sim_mem_mb: size(&sim_mem, d.ios_sim_mem_mb, "ios-sim.mem")?,
             android_emu_mem_mb: size(&emu_mem, d.android_emu_mem_mb, "android-emu.mem")?,
             browser_mem_mb: size(&raw.browser.and_then(|b| b.mem), d.browser_mem_mb, "browser.mem")?,
             ios_devices: raw.ios_device.map(|i| i.ids).unwrap_or_default(),
             android_devices: raw.android_device.map(|i| i.ids).unwrap_or_default(),
         };
-        if cap.heavy_slots < 0 || cap.net_slots < 0 {
-            return Err("heavy_slots、net_slots 不能为负数".into());
+        if cap.heavy_slots < 0 || cap.net_slots < 0 || cap.sim_slots < 0 {
+            return Err("heavy_slots、net_slots、sim_slots 不能为负数".into());
         }
         Ok(Config {
             cap,
@@ -124,7 +128,7 @@ mod tests {
 
     #[test]
     fn doc_example_parses() {
-        let c = Config::parse(
+        let c = Config::parse_for(
             r#"heavy_slots = 2
 mem = "28G"
 disk_floor = "50G"
@@ -143,6 +147,7 @@ ids = []
 [browser]
 mem = "1.5G"
 "#,
+            0,
         )
         .unwrap();
         assert_eq!(c.cap.mem_mb, 28 * 1024);
@@ -153,14 +158,35 @@ mem = "1.5G"
     // CASE-STATUS-5
     #[test]
     fn unknown_key_reports_line() {
-        let e = Config::parse("heavy_slots = 2\nheavy_slot = 3\n").unwrap_err();
+        let e = Config::parse_for("heavy_slots = 2\nheavy_slot = 3\n", 0).unwrap_err();
         assert!(e.contains("line 2"), "{e}");
-        let e = Config::parse("mem = 28\n").unwrap_err();
+        let e = Config::parse_for("mem = 28\n", 0).unwrap_err();
         assert!(e.contains("line 1"), "{e}");
     }
 
     #[test]
     fn empty_means_defaults() {
-        assert_eq!(Config::parse("").unwrap().cap, Capacity::default());
+        assert_eq!(Config::parse_for("", 0).unwrap().cap, Capacity::default());
+    }
+
+    // CASE-QUEUE-7
+    #[test]
+    fn default_memory_from_physical() {
+        assert_eq!(Config::parse_for("", 36 * 1024).unwrap().cap.mem_mb, 27 * 1024, "36G 的 3/4");
+        assert_eq!(Config::parse_for("", 16 * 1024).unwrap().cap.mem_mb, 12 * 1024);
+        assert_eq!(Config::parse_for("mem = \"20G\"\n", 36 * 1024).unwrap().cap.mem_mb, 20 * 1024, "配置了以配置为准");
+        assert_eq!(Config::parse_for("", 0).unwrap().cap.mem_mb, 28 * 1024, "读不到物理内存退回 28G");
+    }
+
+    // CASE-QUEUE-7
+    #[test]
+    fn default_sim_slots_from_physical() {
+        let slots = |text: &str, phys: i64| Config::parse_for(text, phys).unwrap().cap.sim_slots;
+        assert_eq!(slots("", 36 * 1024), 4, "36G：每 8G 一台");
+        assert_eq!(slots("", 16 * 1024), 2);
+        assert_eq!(slots("", 64 * 1024), 8);
+        assert_eq!(slots("", 6 * 1024), 1, "至少 1 台");
+        assert_eq!(slots("", 0), 4, "读不到物理内存时 4 台");
+        assert_eq!(slots("sim_slots = 6\n", 36 * 1024), 6, "配置了以配置为准");
     }
 }

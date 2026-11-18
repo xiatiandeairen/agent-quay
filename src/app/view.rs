@@ -7,11 +7,14 @@ use serde_json::{json, Map, Value};
 
 use super::ctx::Ctx;
 
-pub fn exec_json(ctx: &Ctx, e: &ExecRow, reused: bool, soonest_free_s: Option<i64>) -> Value {
+/// `reused` 只有 `aq run` 的返回才有意义（这次提交是否接上了已有的同一执行）；status、cancel 传 None，不输出这个字段。
+pub fn exec_json(ctx: &Ctx, e: &ExecRow, reused: Option<bool>, soonest_free_s: Option<i64>) -> Value {
     let mut m = Map::new();
     m.insert("id".into(), json!(e.id));
     m.insert("status".into(), json!(e.status.as_str()));
-    m.insert("reused".into(), json!(reused));
+    if let Some(r) = reused {
+        m.insert("reused".into(), json!(r));
+    }
     let est = e.timeout_s.map(|t| t / 3);
     match e.status {
         ExecStatus::Running => {
@@ -61,6 +64,30 @@ pub fn hold_json(h: &HoldRow, devices: &[(String, String)]) -> Value {
         _ => {}
     }
     Value::Object(m)
+}
+
+/// 内存压力已持续多少秒（没有压力时为 None），以及超过多久要加说明。
+pub struct PressureNote {
+    pub for_s: Option<i64>,
+    pub warn_after_s: i64,
+}
+
+/// 排队、等待中的对象加上 `waiting_for`：在等哪类资源（CASE-QUEUE-5、CASE-QUEUE-6、CASE-HOLD-12）。
+/// 在等内存压力回落时另加 `mem_pressure_s`（已持续多久）；超过上限再加 `message`，仍然排队、不失败。
+pub fn annotate_waiting(v: &mut Value, waiting: &std::collections::HashMap<String, Vec<aq_core::admit::Kind>>, p: &PressureNote) {
+    let pending = matches!(v["status"].as_str(), Some("queued" | "waiting"));
+    let Some(kinds) = v["id"].as_str().and_then(|id| waiting.get(id)) else { return };
+    if !pending || kinds.is_empty() {
+        return;
+    }
+    v["waiting_for"] = json!(kinds.iter().map(|k| k.code()).collect::<Vec<_>>());
+    if let (true, Some(s)) = (kinds.contains(&aq_core::admit::Kind::MemPressure), p.for_s) {
+        v["mem_pressure_s"] = json!(s);
+        if s >= p.warn_after_s {
+            v["message"] =
+                json!(format!("系统内存压力已持续 {} 分钟，压力来自 aq 以外的程序；仍在排队，关掉占内存的程序后会自动开始", s / 60));
+        }
+    }
 }
 
 pub fn rejected(reason: &str, message: &str) -> Value {

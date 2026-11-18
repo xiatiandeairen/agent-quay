@@ -64,7 +64,7 @@ impl Procs for FakeProcs {
 pub struct FakeSys;
 impl SysRes for FakeSys {
     fn sample(&self) -> SysSample {
-        SysSample { mem_total_mb: 36_864, mem_avail_mb: 20_000, disk_total_mb: 1_000_000, disk_free_mb: 400_000 }
+        SysSample { mem_total_mb: 36_864, mem_avail_mb: 20_000, disk_total_mb: 1_000_000, disk_free_mb: 400_000, ..SysSample::default() }
     }
     fn cpu_pct(&self) -> i64 {
         30

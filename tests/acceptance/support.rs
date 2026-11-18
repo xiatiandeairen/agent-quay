@@ -101,6 +101,15 @@ impl Env {
         std::fs::write(self.path("sys.json"), v.to_string()).expect("sys");
     }
 
+    /// 在 set_sys 的基础读数上再覆盖别的字段（内存压力、换出、设备内存）。
+    pub fn set_sys_with(&self, extra: serde_json::Value) {
+        let mut v = serde_json::json!({"mem_total_mb": 36_864, "mem_avail_mb": 30_000, "disk_total_mb": 1_000_000, "disk_free_mb": 500_000, "cpu_pct": 20});
+        if let (Some(o), Some(x)) = (v.as_object_mut(), extra.as_object()) {
+            o.extend(x.clone());
+        }
+        std::fs::write(self.path("sys.json"), v.to_string()).expect("sys");
+    }
+
     pub fn set_ai(&self, mode: &str) {
         std::fs::write(self.path("ai/mode"), mode).expect("ai mode");
     }
