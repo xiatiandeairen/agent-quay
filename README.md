@@ -88,7 +88,7 @@ ids = ["00008150-…"]     # only devices listed here are ever lent
 ## How it works
 
 - No daemon: every `aq` process works on one SQLite ledger under `~/.local/state/aq/`.
-- Resource needs come from past runs of the same command in the same repository. For a command seen for the first time, aq asks the calling agent's own CLI for an estimate if that agent is on its verified list (currently Claude Code and Codex); otherwise it uses a conservative default.
+- Resource needs come from past runs of the same command in the same repository. A command seen for the first time starts right away as a light task and is reclassified as heavy while it runs if it turns out to be; if the calling agent is on the verified list (currently Claude Code and Codex), aq also asks that agent's own CLI for an estimate in the background for later reference.
 - A borrowed device is reclaimed when the borrowing agent session exits, or after 2 hours idle when the session cannot be identified.
 
 ## What aq runs

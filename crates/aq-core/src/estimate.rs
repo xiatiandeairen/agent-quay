@@ -1,4 +1,4 @@
-//! 资源评估：实测 → AI 评估 → 保守默认。
+//! 资源评估：实测 → AI 评估缓存 → 首次见到（按轻任务，不等 AI）。
 
 use serde::Deserialize;
 
@@ -20,7 +20,7 @@ pub struct Sample {
 pub enum Source {
     Measured,
     Ai,
-    Default,
+    FirstSeen,
 }
 
 impl Source {
@@ -28,7 +28,7 @@ impl Source {
         match self {
             Source::Measured => "实测",
             Source::Ai => "AI 评估",
-            Source::Default => "保守默认",
+            Source::FirstSeen => "首次见到（按轻任务）",
         }
     }
 }
@@ -123,7 +123,7 @@ pub fn from_history(newest_first: &[Sample], ai_uses_net: Option<bool>, lim: &Li
     })
 }
 
-/// 本机所有命令的实测（保守默认用）。
+/// 本机所有命令的实测（首次见到的命令和 AI 评估的上限用）。
 #[derive(Debug, Clone, Default)]
 pub struct MachineHistory {
     pub peaks_mb: Vec<i64>,
@@ -131,28 +131,41 @@ pub struct MachineHistory {
     pub durations_s: Vec<i64>,
 }
 
-fn p90(v: &[i64]) -> Option<i64> {
+fn quantile(v: &[i64], q: f64) -> Option<i64> {
     let pairs: Vec<(f64, f64)> = v.iter().map(|x| (*x as f64, 1.0)).collect();
-    weighted_quantile(&pairs, 0.9).map(|x| x as i64)
+    weighted_quantile(&pairs, q).map(|x| x as i64)
 }
 
-/// 保守默认：有历史取全机 p90；完全没有历史时内存 = 容量 1/4、磁盘 5G、超时 2 小时。一律重任务、占下载名额。
-pub fn conservative(h: &MachineHistory, cap: &Capacity, lim: &Limits) -> Estimate {
-    let res = |mem_mb, disk_mb| Resources { heavy: true, mem_mb, disk_mb, uses_net: true };
-    match (p90(&h.peaks_mb), p90(&h.durations_s)) {
-        (Some(mem), Some(dur)) => Estimate {
-            res: res(mem.max(1), p90(&h.disk_deltas_mb).unwrap_or(0).max(0)),
-            est_s: dur,
-            timeout_s: timeout_for(dur, lim),
-            source: Source::Default,
+/// 本机还没有任何实测时，首次见到的命令按这么多内存记账。
+pub const FIRST_SEEN_MEM_MB: i64 = 1024;
+/// 内存估计的下限（与 AI 输出的下限一致）。
+const MIN_MEM_MB: i64 = 256;
+
+/// 首次见到的命令：不等 AI，立即按轻任务放行（CASE-EST-13）。内存、磁盘、时长取全机实测中位数，
+/// 没有历史时内存 1G；超时取上限。判轻实重由运行中纠正兜住（CASE-EST-10），跑完一次之后按实测（CASE-EST-5）。
+/// 之前是「AI 同步评估，失败退回保守默认（重任务、容量 1/4）」：实测首次多等 7–74 秒，AI 常把百 MB 级的命令估成 6–12G，
+/// 高负载时一条 3 秒的测试因此排队 100 秒（agent-verify 实测 2026-11-17）。
+pub fn first_seen(h: &MachineHistory, lim: &Limits) -> Estimate {
+    let est_s = quantile(&h.durations_s, 0.5).unwrap_or(lim.timeout_max_s / 3).max(1);
+    Estimate {
+        res: Resources {
+            heavy: false,
+            mem_mb: quantile(&h.peaks_mb, 0.5).unwrap_or(FIRST_SEEN_MEM_MB).max(MIN_MEM_MB),
+            disk_mb: quantile(&h.disk_deltas_mb, 0.5).unwrap_or(0).max(0),
+            uses_net: false,
         },
-        _ => Estimate {
-            res: res(cap.mem_mb / 4, 5 * 1024),
-            est_s: lim.timeout_max_s / 3,
-            timeout_s: lim.timeout_max_s,
-            source: Source::Default,
-        },
+        est_s,
+        timeout_s: lim.timeout_max_s,
+        source: Source::FirstSeen,
     }
+}
+
+/// AI 评估的内存不超过全机实测峰值 p90（CASE-EST-14）：AI 只看命令和仓库规模，常把小命令估成几 G。没有历史时不限。
+pub fn cap_ai(mut est: Estimate, h: &MachineHistory) -> Estimate {
+    if let Some(p90) = quantile(&h.peaks_mb, 0.9) {
+        est.res.mem_mb = est.res.mem_mb.min(p90.max(MIN_MEM_MB));
+    }
+    est
 }
 
 /// AI CLI 必须输出的格式。`reason` 只要求存在（排查时看 profiles.ai_output 原文），不参与计算。
@@ -168,8 +181,7 @@ struct AiOutput {
 }
 
 /// 校验 AI 输出：严格 JSON；内存不超过整机容量、耗时不超过 2 小时；reason 非空。不合格返回 None。
-/// 低于下限（内存 256MB、耗时 1 秒）的抬到下限：轻命令 AI 会给出很小的值，抬高是更保守的方向；
-/// 若当作失败，会退回保守默认（重任务、容量 1/4 内存），反而让 echo 这类命令占掉重任务名额（实测 claude -p）。
+/// 低于下限（内存 256MB、耗时 1 秒）的抬到下限：轻命令 AI 会给出很小的值，抬高是更保守的方向。
 pub fn parse_ai(text: &str, cap: &Capacity, lim: &Limits) -> Option<Estimate> {
     let o = last_json(text)?;
     if !(o.mem_gb.is_finite() && o.est_minutes.is_finite() && o.disk_gb.is_finite())
@@ -179,7 +191,7 @@ pub fn parse_ai(text: &str, cap: &Capacity, lim: &Limits) -> Option<Estimate> {
     {
         return None;
     }
-    let mem_mb = ((o.mem_gb * 1024.0).round() as i64).max(256);
+    let mem_mb = ((o.mem_gb * 1024.0).round() as i64).max(MIN_MEM_MB);
     let est_s = ((o.est_minutes * 60.0).round() as i64).max(1);
     let disk_mb = (o.disk_gb * 1024.0).round() as i64;
     if mem_mb > cap.mem_mb || est_s > lim.timeout_max_s || o.reason.trim().is_empty() {
@@ -194,7 +206,7 @@ pub fn parse_ai(text: &str, cap: &Capacity, lim: &Limits) -> Option<Estimate> {
 }
 
 /// 取输出末尾的 JSON 对象：前面的说明文字和 ```json 代码块开头不管，之后只允许空白和代码块结尾。
-/// claude -p 常先写一段分析再给 JSON，按严格 JSON 判会退回保守默认（实测）。字段仍按 AiOutput 严格校验（CASE-EST-3）。
+/// claude -p 常先写一段分析再给 JSON，按严格 JSON 判会白白丢掉这次评估（实测）。字段仍按 AiOutput 严格校验（CASE-EST-3）。
 fn last_json(text: &str) -> Option<AiOutput> {
     let t = text.trim_end();
     let t = t.strip_suffix("```").unwrap_or(t).trim_end();

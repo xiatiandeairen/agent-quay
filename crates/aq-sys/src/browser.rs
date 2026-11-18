@@ -1,5 +1,5 @@
 //! 浏览器：一个 agent-browser 会话（独立的无窗口 Chrome，cookie、存储与其他会话隔离）。
-//! 借时用会话名 aq-<借用id>-<序号> 打开 about:blank，让 Chrome 真正起来（约 1.5–2 秒），设备 id 就是会话名；
+//! 借时用会话名 aq-<账本标识>-<借用id>-<序号> 打开 about:blank，让 Chrome 真正起来（约 1.5–2 秒），设备 id 就是会话名；
 //! agent 之后用 `agent-browser --session <id> ...` 操作。还时 `close` 关掉这个会话的 Chrome。
 //! 验收测试用 AQ_AGENT_BROWSER 指向假脚本。
 

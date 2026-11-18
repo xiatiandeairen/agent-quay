@@ -31,7 +31,8 @@ fn load(store: &mut Store, id: &str) -> AppResult<Option<ExecRow>> {
     store.tx(|c| Ok::<_, AppError>(aq_store::get_exec(c, id)?))
 }
 
-fn evaluate(ctx: &Ctx, store: &mut Store, e: &ExecRow) -> AppResult<bool> {
+/// 返回 None 表示已拒绝；Some(true) 表示首次见到、放行后要在后台评估。
+fn evaluate(ctx: &Ctx, store: &mut Store, e: &ExecRow) -> AppResult<Option<bool>> {
     let est = estimate::estimate(ctx, store, e)?;
     ctx.log_note(
         &e.id,
@@ -48,10 +49,10 @@ fn evaluate(ctx: &Ctx, store: &mut Store, e: &ExecRow) -> AppResult<bool> {
         if store.tx(|c| aq_store::reject_exec(c, &e.id, ctx.now()))? {
             ctx.log_transition(&e.id, "queued", "rejected", &why);
         }
-        return Ok(false);
+        return Ok(None);
     }
     store.tx(|c| aq_store::set_estimate(c, &e.id, &est.res, est.timeout_s))?;
-    Ok(true)
+    Ok(Some(est.source == aq_core::estimate::Source::FirstSeen))
 }
 
 fn try_start(ctx: &Ctx, c: &aq_store::Conn, e: &ExecRow) -> AppResult<Step> {
@@ -147,15 +148,27 @@ pub fn run(ctx: &Ctx, store: &mut Store, id: &str, _lock: File) -> AppResult<()>
     if e.status != ExecStatus::Queued {
         return Ok(());
     }
+    let mut learn = false;
     if e.res.is_none() {
-        if !evaluate(ctx, store, &e)? {
-            return Ok(());
-        }
+        let Some(first) = evaluate(ctx, store, &e)? else { return Ok(()) };
+        learn = first;
         let Some(fresh) = load(store, id)? else { return Ok(()) };
         e = fresh;
     }
+    // 首次见到的命令：AI 评估和排队、执行同时进行，不挡放行（CASE-EST-13）；runner 退出前等它写完缓存
+    std::thread::scope(|s| {
+        if learn {
+            let row = e.clone();
+            s.spawn(move || estimate::learn(ctx, &row));
+        }
+        execute(ctx, store, &e)
+    })
+}
+
+fn execute(ctx: &Ctx, store: &mut Store, e: &ExecRow) -> AppResult<()> {
+    let id = e.id.as_str();
     let disk_before = ctx.sys.sample().disk_free_mb;
-    let Some(gate) = queue(ctx, store, &e)? else { return Ok(()) };
+    let Some(gate) = queue(ctx, store, e)? else { return Ok(()) };
     let Some(row) = aq_store::get_exec(store.conn(), id)? else { return Ok(()) };
     let mut o = watch(ctx, store, &row, gate)?;
     o.disk_delta_mb = (disk_before - ctx.sys.sample().disk_free_mb).max(0);

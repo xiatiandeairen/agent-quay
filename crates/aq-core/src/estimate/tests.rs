@@ -65,23 +65,37 @@ fn heavy_by_weighted_majority_of_cpu() {
     assert!(!from_history(&[light; 5], None, &lim).unwrap().res.heavy);
 }
 
-// CASE-EST-4
+// CASE-EST-13
 #[test]
-fn default_without_history() {
-    let cap = Capacity::default();
-    let e = conservative(&MachineHistory::default(), &cap, &Limits::default());
-    assert_eq!(e.res.mem_mb, cap.mem_mb / 4);
-    assert!(e.res.heavy && e.res.uses_net);
+fn first_seen_is_light_without_history() {
+    let e = first_seen(&MachineHistory::default(), &Limits::default());
+    assert!(!e.res.heavy && !e.res.uses_net);
+    assert_eq!(e.res.mem_mb, FIRST_SEEN_MEM_MB);
     assert_eq!(e.timeout_s, 7200);
+    assert_eq!(e.source, Source::FirstSeen);
 }
 
-// CASE-EST-4
+// CASE-EST-13
 #[test]
-fn default_with_history_uses_p90() {
-    let h = MachineHistory { peaks_mb: (1..=10).map(|g| g * 1024).collect(), disk_deltas_mb: vec![10], durations_s: vec![100; 10] };
-    let e = conservative(&h, &Capacity::default(), &Limits::default());
-    assert_eq!(e.res.mem_mb, 9 * 1024);
-    assert_eq!(e.timeout_s, 1800, "全机时长 p90 很短时超时也不低于 30 分钟");
+fn first_seen_uses_machine_median() {
+    let h = MachineHistory { peaks_mb: (1..=10).map(|g| g * 100).collect(), disk_deltas_mb: vec![10], durations_s: vec![100; 10] };
+    let e = first_seen(&h, &Limits::default());
+    assert_eq!(e.res.mem_mb, 500, "全机实测峰值中位数");
+    assert!(!e.res.heavy);
+    assert_eq!(e.est_s, 100);
+}
+
+// CASE-EST-14
+#[test]
+fn ai_memory_capped_at_machine_p90() {
+    let c = Capacity::default();
+    let l = Limits::default();
+    let ai = parse_ai(r#"{"heavy": false, "mem_gb": 12, "disk_gb": 0, "net": false, "est_minutes": 1, "reason": "x"}"#, &c, &l).unwrap();
+    let h = MachineHistory { peaks_mb: vec![30, 100, 227], ..Default::default() };
+    assert_eq!(cap_ai(ai, &h).res.mem_mb, 256, "p90 227MB 低于下限，抬到 256MB");
+    let h = MachineHistory { peaks_mb: (1..=10).map(|g| g * 1024).collect(), ..Default::default() };
+    assert_eq!(cap_ai(ai, &h).res.mem_mb, 9 * 1024);
+    assert_eq!(cap_ai(ai, &MachineHistory::default()).res.mem_mb, 12 * 1024, "没有历史不限");
 }
 
 // CASE-EST-4

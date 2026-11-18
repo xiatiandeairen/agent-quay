@@ -110,7 +110,7 @@ fn task_row(store: &Store, e: &ExecRow, now: i64, waiting: &HashMap<String, Vec<
         let src = match super::human::source(store, e) {
             Source::Measured => "measured",
             Source::Ai => "AI",
-            Source::Default => "default",
+            Source::FirstSeen => "first seen",
         };
         (e.started_at.unwrap_or(now), format!("estimate: {src}"))
     };

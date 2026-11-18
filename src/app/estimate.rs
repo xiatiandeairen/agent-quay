@@ -1,6 +1,7 @@
-//! runner 的资源评估：实测 → AI 评估缓存 → 调 AI CLI（同签名只调一次）→ 保守默认。
+//! runner 的资源评估：实测 → AI 评估缓存（内存不超过全机 p90）→ 首次见到按轻任务立即放行。
+//! AI CLI 不在放行路径上：首次见到的命令放行后由 runner 在后台线程里评估一次并缓存（同签名只调一次）。
 
-use aq_core::estimate::{conservative, from_history, parse_ai, Estimate};
+use aq_core::estimate::{cap_ai, first_seen, from_history, parse_ai, Estimate};
 use aq_core::ports::AiCli;
 use aq_core::signature::signature;
 use aq_store::{ExecRow, Profile, Store};
@@ -9,7 +10,7 @@ use aq_sys::ai::AiCommand;
 use super::ctx::Ctx;
 use super::error::AppResult;
 
-/// AI 失败后这么久内的同签名请求直接用保守默认，避免并发的同签名请求各调一次（CASE-EST-1、CASE-EST-1）。
+/// AI 失败后这么久内的同签名请求不再调 AI，避免并发的同签名请求各调一次（CASE-EST-1、CASE-EST-3）。
 const FAILED_FRESH_MS: u128 = 120_000;
 
 fn ai_argv(ctx: &Ctx) -> Option<Vec<String>> {
@@ -102,7 +103,7 @@ fn ask_ai(ctx: &Ctx, store: &mut Store, e: &ExecRow) -> AppResult<Option<Estimat
                 Ok(t) => format!("输出不合格：{}", t.chars().take(200).collect::<String>()),
                 Err(e) => e,
             };
-            ctx.log_note(&e.id, &format!("AI 评估失败，用保守默认：{why}"));
+            ctx.log_note(&e.id, &format!("AI 评估失败，不写缓存：{why}"));
             let _ = std::fs::write(&failed_mark, b""); // 标记写失败只会让并发请求多调一次 AI
             Ok(None)
         }
@@ -124,12 +125,26 @@ pub fn estimate(ctx: &Ctx, store: &mut Store, e: &ExecRow) -> AppResult<Estimate
     if let Some(est) = from_history(&hist, profile.as_ref().map(|p| p.res.uses_net), &ctx.limits) {
         return Ok(est);
     }
-    if let Some(p) = &profile {
-        return Ok(profile_estimate(ctx, p));
-    }
-    if let Some(est) = ask_ai(ctx, store, e)? {
-        return Ok(est);
-    }
     let mh = aq_store::machine_history(store.conn())?;
-    Ok(conservative(&mh, &ctx.config.cap, &ctx.limits))
+    if let Some(p) = &profile {
+        return Ok(cap_ai(profile_estimate(ctx, p), &mh));
+    }
+    if ctx.tuning.ai_blocking {
+        if let Some(est) = ask_ai(ctx, store, e)? {
+            return Ok(cap_ai(est, &mh));
+        }
+    }
+    Ok(first_seen(&mh, &ctx.limits))
+}
+
+/// 后台评估：首次见到的命令放行后调一次 AI 并缓存，给之后还没有实测的同类提交用。不调 AI 的调用方（认不出 agent 且没配 ai_cli）直接返回。
+/// 在 runner 的后台线程里跑，自己开账本连接；失败只记日志。
+pub fn learn(ctx: &Ctx, e: &ExecRow) {
+    if ai_argv(ctx).is_none() {
+        return;
+    }
+    let r = aq_store::Store::open(&ctx.dirs.db).map_err(super::error::AppError::from).and_then(|mut s| ask_ai(ctx, &mut s, e));
+    if let Err(err) = r {
+        ctx.log_note(&e.id, &format!("后台 AI 评估出错：{err:?}"));
+    }
 }

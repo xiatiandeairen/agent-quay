@@ -1,6 +1,7 @@
 //! 模拟器后台删除与按名字对账。
 //! 已结束借用的模拟器行：关机删除后再删行，删完它占的内存才算释放。
-//! 每 10 分钟列出 aq- 开头的模拟器和浏览器会话，对应借用已不是 waiting/held 的就删掉。同一时刻只有一个清理进程（锁 simgc）。
+//! 每 10 分钟列出本账本的模拟器、实例和浏览器会话（名字带本账本标识，见 aq-core devname），对应借用已不是 waiting/held 的就删掉；
+//! 别的账本的设备一律不动（CASE-HOLD-9）。同一时刻只有一个清理进程（锁 simgc）。
 
 use std::collections::HashSet;
 
@@ -61,8 +62,8 @@ fn reconcile(ctx: &Ctx, store: &mut Store, sim: &dyn Simulator) -> AppResult<()>
     let held: HashSet<String> = holds.iter().filter(|h| h.status == HoldStatus::Held).map(|h| h.id.clone()).collect();
     let known: HashSet<String> = aq_store::devices(store.conn())?.into_iter().filter_map(|d| d.device).collect();
     for (name, udid) in list {
-        let hold_id = name.trim_start_matches("aq-").rsplit_once('-').map(|(h, _)| h.to_string()).unwrap_or_default();
-        // 等待中的借用可能正在创建，不动；已借出的只保留记在设备行里的那台；其余都是残留
+        let Some(hold_id) = ctx.my_hold_of(&name) else { continue }; // 别的账本或认不出的名字：不归本账本管
+                                                                     // 等待中的借用可能正在创建，不动；已借出的只保留记在设备行里的那台；其余都是残留
         let keep = waiting.contains(&hold_id) || (held.contains(&hold_id) && known.contains(&udid));
         if !keep {
             let _ = sim.delete(&udid); // 删失败下次对账再删

@@ -117,10 +117,9 @@ fn touch_if_missing(ctx: &Ctx, id: &str) {
 fn cleanup_half_made(ctx: &Ctx, store: &mut Store, h: &HoldRow) -> AppResult<()> {
     let mut types: Vec<DeviceType> = h.request.devices.iter().copied().filter(|d| d.is_virtual()).collect();
     types.dedup();
-    let prefix = format!("aq-{}-", h.id);
     for backend in types.into_iter().filter_map(|t| ctx.virtual_backend(t)) {
         for (name, id) in backend.list_aq().unwrap_or_default() {
-            if name.starts_with(&prefix) {
+            if ctx.my_hold_of(&name).as_deref() == Some(h.id.as_str()) {
                 let _ = backend.delete(&id); // 删失败由定期对账兜底
                 ctx.log_note(&h.id, &format!("删除上一个 runner 留下的半成品 {name}"));
             }
@@ -161,7 +160,7 @@ fn create_sims(ctx: &Ctx, id: &str, devs: &[(DeviceType, Option<String>)]) -> Re
     for (i, (t, _)) in devs.iter().enumerate() {
         let seq = i as i64 + 1;
         let Some(backend) = ctx.virtual_backend(*t) else { continue };
-        match backend.create(&format!("aq-{id}-{seq}")) {
+        match backend.create(&ctx.device_name(id, seq)) {
             Ok(dev) => made.push((seq, *t, dev)),
             Err(e) => return Err((made, e)),
         }

@@ -53,7 +53,7 @@ pub trait SysRes {
     fn cpu_pct(&self) -> i64;
 }
 
-/// 模拟器：按名字新建并启动、关机删除、列出 aq- 开头的。
+/// 模拟器：按名字新建并启动、关机删除、列出 aq- 开头的（含别的账本的，归属由 devname 判）。
 pub trait Simulator {
     fn create(&self, name: &str) -> Result<String, String>;
     fn delete(&self, udid: &str) -> Result<(), String>;

@@ -40,7 +40,7 @@ fn runner_state(ctx: &Ctx, id: &str) -> &'static str {
     }
 }
 
-/// 评估来自哪里：提交前同类命令已有实测 → 实测；否则有 AI 缓存 → AI 评估；否则保守默认。
+/// 评估来自哪里：提交前同类命令已有实测 → 实测；否则有 AI 缓存 → AI 评估；否则首次见到。
 pub(super) fn source(store: &Store, e: &ExecRow) -> aq_core::estimate::Source {
     use aq_core::estimate::Source;
     let c = store.conn();
@@ -49,7 +49,7 @@ pub(super) fn source(store: &Store, e: &ExecRow) -> aq_core::estimate::Source {
     } else if aq_store::get_profile(c, &e.profile_key).ok().flatten().is_some() {
         Source::Ai
     } else {
-        Source::Default
+        Source::FirstSeen
     }
 }
 

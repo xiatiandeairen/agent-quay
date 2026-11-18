@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use aq_core::model::{DeviceType, ExecStatus};
+use aq_core::model::{DeviceType, ExecStatus, HoldStatus};
 use aq_core::ports::SysRes;
 use aq_store::Store;
 use serde_json::{json, Value};
@@ -69,9 +69,41 @@ fn one(ctx: &Ctx, store: &Store, id: &str, soonest: Option<i64>) -> AppResult<(V
     }
     if let Some(h) = aq_store::get_hold(store.conn(), id)? {
         let devs = view::hold_devices(store.conn(), id)?;
-        return Ok((view::hold_json(&h, &devs), h.status.exit_code(), h.status.is_settled()));
+        let mut v = view::hold_json(&h, &devs);
+        if h.status == HoldStatus::Held {
+            let gone = missing_devices(ctx, store, id)?;
+            if !gone.is_empty() {
+                ctx.log_note(id, &format!("借出的设备已不在：{}", gone.join(", ")));
+                v["missing"] = json!(gone);
+            }
+        }
+        return Ok((v, h.status.exit_code(), h.status.is_settled()));
     }
     Ok((view::rejected_with_id(id, "usage", "id 不存在（或已被保留策略清理）"), 3, true))
+}
+
+/// held 的借用里已经不存在的虚拟设备（被外部删掉、模拟器服务被重置）。借用状态不变，由调用方决定归还重借（CASE-HOLD-11）。
+/// 列不出设备（工具没装、超时）时判不了，当作都在。desktop 只是会话名，没有实体可查。
+fn missing_devices(ctx: &Ctx, store: &Store, hold_id: &str) -> AppResult<Vec<String>> {
+    let mine: Vec<(DeviceType, String)> = aq_store::devices(store.conn())?
+        .into_iter()
+        .filter(|d| d.hold_id == hold_id && d.dtype.is_virtual() && d.dtype != DeviceType::Desktop)
+        .filter_map(|d| Some((d.dtype, d.device?)))
+        .collect();
+    let mut gone = vec![];
+    let mut types: Vec<DeviceType> = vec![];
+    for (t, _) in &mine {
+        if !types.contains(t) {
+            types.push(*t);
+        }
+    }
+    for t in types {
+        let Some(backend) = ctx.virtual_backend(t) else { continue };
+        let Ok(list) = backend.list_aq() else { continue };
+        let present: std::collections::HashSet<String> = list.into_iter().map(|(_, id)| id).collect();
+        gone.extend(mine.iter().filter(|(dt, id)| *dt == t && !present.contains(id)).map(|(_, id)| id.clone()));
+    }
+    Ok(gone)
 }
 
 /// 带 id：逐个查；带 --wait 每隔 poll 查一次，直到全部结束或到期。退出码取最大。

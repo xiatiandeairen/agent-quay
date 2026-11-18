@@ -1,6 +1,6 @@
 //! Android 模拟器（emulator + adb）。借时按配置的 AVD 用 `-read-only` 新起一个实例，还时 `adb emu kill`。
 //! aq 只用 5600–5680 的端口，用户自己开的模拟器（默认 5554 起）不受影响；设备 id 为 `emulator-<端口>`。
-//! 名字（aq-<借用id>-<序号>）记在 STATE/emu/<端口>.name，用来按名字对账；端口用 STATE/emu/<端口>.lock 防并发撞车。
+//! 名字（aq-<账本标识>-<借用id>-<序号>）记在 STATE/emu/<端口>.name，用来按名字对账；别的账本起的实例在本账本没有名字记录，列成 aq-unknown-0，对账不动；端口用 STATE/emu/<端口>.lock 防并发撞车。
 //! 验收测试用 AQ_EMULATOR、AQ_ADB 指向假脚本。
 
 use std::path::{Path, PathBuf};

@@ -79,6 +79,18 @@ impl Env {
         self.path("st/aq")
     }
 
+    /// 这个环境的账本标识（与 aq 一样取状态目录真实路径的哈希）。
+    pub fn ledger(&self) -> String {
+        // aq 第一次运行前状态目录还不存在：取已存在的上一级的真实路径再接上 aq
+        let p = std::fs::canonicalize(self.path("st")).map(|d| d.join("aq")).unwrap_or_else(|_| self.state());
+        aq_core::devname::ledger_tag(&p.to_string_lossy())
+    }
+
+    /// 这个环境里 aq 给虚拟设备起的名字。
+    pub fn dev_name(&self, hold_id: &str, seq: i64) -> String {
+        aq_core::devname::name(&self.ledger(), hold_id, seq)
+    }
+
     pub fn write_config(&self, text: &str) {
         std::fs::write(self.path("cfg/aq/config.toml"), text).expect("config");
     }
@@ -151,6 +163,8 @@ impl Env {
             .env("AQ_T_KILL_GRACE_MS", "1000")
             .env("AQ_T_SIMGC_S", "1")
             .env("AQ_T_AI_TIMEOUT_S", "3")
+            // 首次见到的命令同步等假 AI：多数用例用假 AI 的输出设定首次资源。CASE-EST-13 设为 0 验正式行为
+            .env("AQ_T_AI_BLOCKING", "1")
             .env("TMPDIR", self.dir.path());
         for (k, v) in self.extra.borrow().iter() {
             c.env(k, v);

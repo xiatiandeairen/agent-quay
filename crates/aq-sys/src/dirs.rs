@@ -24,6 +24,14 @@ impl Dirs {
         Ok(Self::at(&x.config_dir().join("aq/config.toml"), &state_root.join("aq")))
     }
 
+    /// 是不是默认账本（`~/.local/state/aq`，不受 XDG_STATE_HOME 影响）。旧格式的设备名只由默认账本认领（CASE-HOLD-10）。
+    pub fn is_default_state(&self) -> bool {
+        let Ok(x) = Xdg::new() else { return false };
+        let default = x.home_dir().join(".local/state/aq");
+        let canon = |p: &Path| fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+        canon(&self.state) == canon(&default)
+    }
+
     pub fn at(config_file: &Path, state: &Path) -> Dirs {
         Dirs {
             config_file: config_file.to_path_buf(),

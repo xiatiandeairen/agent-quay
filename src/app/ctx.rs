@@ -30,6 +30,8 @@ pub struct Tuning {
     pub default_wait_s: u64,
     /// 运行中纠正重任务的观察窗口（文档：10 秒）。
     pub heavy_window_ms: i64,
+    /// 只给验收测试：首次见到的命令先同步等 AI 评估再放行（旧行为），让测试能用假 AI 的输出设定首次资源。正式运行为假。
+    pub ai_blocking: bool,
 }
 
 fn env_i64(k: &str) -> Option<i64> {
@@ -54,6 +56,7 @@ impl Tuning {
             keep: env_i64("AQ_T_KEEP").unwrap_or(5000),
             default_wait_s: 100,
             heavy_window_ms: env_i64("AQ_T_HEAVY_WINDOW_S").unwrap_or(10) * 1000,
+            ai_blocking: env_i64("AQ_T_AI_BLOCKING") == Some(1),
         };
         (t, lim)
     }
@@ -72,6 +75,10 @@ pub struct Ctx {
     pub exe: PathBuf,
     /// 触发命令名，写进 aq.log。
     pub by: &'static str,
+    /// 本账本标识，写进虚拟设备名；对账只删带本标识的设备（CASE-HOLD-9）。
+    pub ledger: String,
+    /// 默认账本也认领旧格式（不带标识）的设备名（CASE-HOLD-10）。
+    pub default_ledger: bool,
 }
 
 impl Ctx {
@@ -82,7 +89,12 @@ impl Ctx {
         let store = Store::open(&dirs.db).map_err(AppError::from)?;
         let (tuning, limits) = Tuning::from_env();
         let exe = std::env::current_exe().map_err(|e| AppError::Fatal(format!("找不到 aq 可执行文件：{e}")))?;
+        let canon = std::fs::canonicalize(&dirs.state).unwrap_or_else(|_| dirs.state.clone());
+        let ledger = aq_core::devname::ledger_tag(&canon.to_string_lossy());
+        let default_ledger = dirs.is_default_state();
         let ctx = Ctx {
+            ledger,
+            default_ledger,
             sys: RealSys::new(dirs.state.clone()),
             locks: LockDir { dir: dirs.locks.clone() },
             git: RealGit { budget: Duration::from_secs(30) },
@@ -147,6 +159,19 @@ impl Ctx {
             DeviceType::Browser => Some(Box::new(aq_sys::browser::AgentBrowser::from_env())),
             DeviceType::Desktop => Some(Box::new(aq_sys::desktop::AgentDesktop)),
             DeviceType::IosDevice | DeviceType::AndroidDevice => None,
+        }
+    }
+
+    /// 虚拟设备名：aq-<账本标识>-<借用id>-<序号>。
+    pub fn device_name(&self, hold_id: &str, seq: i64) -> String {
+        aq_core::devname::name(&self.ledger, hold_id, seq)
+    }
+
+    /// 设备名属于本账本的哪组借用；别的账本或认不出的名字为 None。
+    pub fn my_hold_of(&self, name: &str) -> Option<String> {
+        match aq_core::devname::owner(name, &self.ledger, self.default_ledger) {
+            aq_core::devname::Owner::Mine(h) => Some(h),
+            aq_core::devname::Owner::Other => None,
         }
     }
 

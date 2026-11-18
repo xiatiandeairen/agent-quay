@@ -223,7 +223,7 @@ pub fn measured_before(c: &Connection, profile_key: &str, before: i64) -> Result
     )?)
 }
 
-/// 全机最近 500 次实测，用于保守默认的 p90。
+/// 全机最近 500 次实测：首次见到的命令取中位数，AI 评估的内存以 p90 为上限。
 pub fn machine_history(c: &Connection) -> Result<MachineHistory> {
     let mut h = MachineHistory::default();
     for st in ["ok", "failed", "timeout"] {

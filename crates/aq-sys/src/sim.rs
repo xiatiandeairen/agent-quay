@@ -1,4 +1,4 @@
-//! iOS 模拟器（xcrun simctl）。借时按配置机型新建 aq-<借用id>-<序号> 并启动，还时关机删除。
+//! iOS 模拟器（xcrun simctl）。借时按配置机型新建 aq-<账本标识>-<借用id>-<序号> 并启动，还时关机删除。
 //! 删设备时一并删掉它在 ~/Library/Logs/CoreSimulator 下的日志目录。
 //! 验收测试用 AQ_SIMCTL 指向假 simctl 脚本（可注入创建失败，CASE-HOLD-7、CASE-HOLD-7）。
 //! android-emu 一期未实现：真实记录里没有 Android 用法，借用时返回 device_error。
@@ -81,7 +81,7 @@ impl Simulator for SimCtl {
         }
         let booted = self.call(&["boot", &udid], 180).and_then(|_| self.call(&["bootstatus", &udid, "-b"], 300));
         if let Err(e) = booted {
-            let _ = self.delete(&udid); // 启动失败的半成品立即删；删失败由 aq- 前缀对账兜底
+            let _ = self.delete(&udid); // 启动失败的半成品立即删；删失败由本账本的定期对账兜底
             return Err(e);
         }
         Ok(udid)
