@@ -60,7 +60,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "aq"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "aq-core",
@@ -77,7 +77,7 @@ dependencies = [
 
 [[package]]
 name = "aq-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "blake3",
  "proptest",
@@ -87,7 +87,7 @@ dependencies = [
 
 [[package]]
 name = "aq-store"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "aq-core",
  "rusqlite",
@@ -99,7 +99,7 @@ dependencies = [
 
 [[package]]
 name = "aq-sys"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "aq-core",
  "blake3",

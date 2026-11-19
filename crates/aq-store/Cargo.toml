@@ -9,7 +9,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-aq-core = { version = "0.4.0", path = "../aq-core" }
+aq-core = { version = "0.5.0", path = "../aq-core" }
 rusqlite = { version = "0.41", features = ["bundled"] }
 rusqlite_migration = "2.7.0"
 serde_json = "1.0.154"
