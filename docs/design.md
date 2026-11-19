@@ -32,7 +32,7 @@ aq status ex_7f3a --wait 100
 | 问题 | aq 的做法 |
 | --- | --- |
 | 多个 agent 同时编译，内存换页、机器卡死 | 按内存、磁盘余量放行，重任务同时最多 N 个（默认 2） |
-| 多个 agent 抢同一台模拟器、真机或测试账号 | 设备和账号一次只借给一组；模拟器每次新建、归还即删；借用者退出或闲置就收回 |
+| 多个 agent 抢同一台模拟器、真机或测试账号 | 设备和账号一次只借给一组；模拟器每次新建、归还即删；借用者退出、闲置或借出超过上限就收回 |
 | 同一份代码上的同一条命令被重复执行 | 进行中的执行直接共用，结果共享 |
 | agent 写循环轮询结果 | 一条命令等结果，超时先返回状态，再查一次接着等 |
 
@@ -56,7 +56,7 @@ aq 按需使用：只调度经它提交的任务，不拦截其他命令。
 | 不引入常驻后台服务 | 后台服务挂掉会卡住所有人，且要维护安装和升级 |
 | 不写任何项目的特例 | 接入新项目、新命令不改 aq |
 | 不碰项目的缓存、不改仓库内容 | 避免破坏增量编译 |
-| 不凭进程号单独判断进程存活，不按占用时长强行收回在用的设备 | 进程号会被重用；占得久不代表不用 |
+| 不凭进程号单独判断进程存活；在用的设备只在借出超过上限（默认 4 小时）时强行收回 | 进程号会被重用；占得久不代表不用，上限只兜「会话一直开着、人早就不用了」 |
 | agent 的命令可能随时被打断，重复执行必须安全 | agent 的命令行工具有调用超时 |
 | 绕过 aq 的占用也要算进去 | 机器不只 aq 在用 |
 
@@ -179,7 +179,7 @@ e. 结束：重算指纹得出 content_changed；写结果和实测；做一次�
 4. runner 排队；轮到时在同一事务里分配真机、写入账号、为模拟器预留内存（仍为 waiting）
    提交后创建并启动模拟器、实例或会话，回填设备 id → held
    创建失败 → 整组回滚、全部释放 → rejected device_error
-   runner 到此退出；之后借用是否有效，只看借用者和闲置情况
+   runner 到此退出；之后借用是否有效，只看借用者、设备是否在用和借出时长（5.5）
 5. 前台按 --wait 等待；借到后创建 holds/<id>.used 作为闲置计时起点
 ```
 
@@ -214,7 +214,7 @@ cancel： queued  → cancelled（runner 看到后退出）
    runner 不在、命令进程也不在 → interrupted，释放资源
    runner 不在、命令进程还在   → 继续计占用，等它结束
    排队中的 runner 不在        → 重新拉起，保持排队位置
-2. 借用：借用者已退出 → reclaimed；闲置超限 → reclaimed
+2. 借用：借用者已退出 → reclaimed；探测设备是否在用，在用就刷新 holds/<id>.used；借出超过上限、闲置超限 → reclaimed
    被收回的设备交给后台删除；定期按名字对账，删掉本账本里没有对应活动借用的残留（别的账本的设备不动）
 3. 放行：排队的执行和借用按先后一起过一遍，资源够就放行（5.3）
 ```
@@ -358,19 +358,44 @@ C 是配置的容量，a 是各任务记账量，u 是当前实际用量，F 是
 ### 5.5 自动回收
 
 ```text
-任意 aq 命令 ──► 检查 ──┬─ 借用者已退出？ ──► 整组收回
-                       ├─ 闲置超过阈值？  ──► 整组收回
+任意 aq 命令 ──► 检查 ──┬─ 借用者已退出？           ──► 整组收回（借用者退出）
+                       ├─ 探测设备是否在用 ──► 在用就把 holds/<id>.used 改成现在
+                       ├─ 借出超过上限？           ──► 整组收回（超过借用上限）
+                       ├─ .used 超过阈值没更新？    ──► 整组收回（闲置）
                        └─ 再判定哪些排队的可以放行
 ```
 
-| 策略 | 做法 |
-| --- | --- |
-| 借用者退出就收回 | 借用时按环境变量认出 agent，沿父进程链找到它的会话主进程（已验证 agent 表里的 argv[0]），记下进程号和启动时间；检查时两者都对得上才算还在（CASE-RECLAIM-3） |
-| 闲置超限收回 | 使用设备的工具每次操作时更新 `holds/<借用id>.used` 的修改时间；超过阈值（默认 2 小时）没更新就收回。收回后使用方发现文件不在，得知已收回（CASE-RECLAIM-4） |
-| 认不出借用者 | 借用者记为未识别（进程号 0），只按闲置收回。不拿直接调用方顶替：它多半是每条命令临时起的 shell，命令结束就退出（CASE-RECLAIM-5） |
-| 归还提醒（可选） | `scripts/stop-hook.sh` 装成 Claude Code 的 Stop hook 后，借着设备闲置 5 分钟结束回答时提醒一次 `aq release`，不拦截（CASE-RECLAIM-8） |
+| 层 | 做法 | 用例 |
+| --- | --- | --- |
+| 借用者退出就收回 | 借用时按环境变量认出 agent，沿父进程链找到它的会话主进程（已验证 agent 表里的 argv[0]），记下进程号和启动时间；检查时两者都对得上才算还在 | CASE-RECLAIM-3 |
+| 闲置收回 | 每次检查时 aq 自己探测设备是否在用（下表），在用就把 `holds/<借用id>.used` 的修改时间改成现在；超过 `AQ_T_IDLE_RECLAIM_S`（默认 30 分钟）没更新就收回，原因「闲置」。收回后删除 `.used`，使用方发现文件不在，得知已收回。只含浏览器、桌面会话的借用探测不到使用，不按闲置收回 | CASE-RECLAIM-4 |
+| 借出上限 | 借出超过 `AQ_T_MAX_HOLD_S`（默认 4 小时），不管是否在用都收回，原因「超过借用上限」 | CASE-RECLAIM-9 |
+| 认不出借用者 | 借用者记为未识别（进程号 0），跳过第一层，闲置和上限照常。不拿直接调用方顶替：它多半是每条命令临时起的 shell，命令结束就退出 | CASE-RECLAIM-5 |
+| 归还提醒（可选） | `scripts/stop-hook.sh` 装成 Claude Code 的 Stop hook 后，借着设备闲置 5 分钟结束回答时提醒一次 `aq release`，不拦截 | CASE-RECLAIM-8 |
 
-release 和自动收回同时触发时只有一个生效，设备只删一次（CASE-RECLAIM-7）。
+一次检查里多条同时成立时只出一个动作，原因按「借用者退出 → 超过借用上限 → 闲置」取第一个。release 和自动收回同时触发时只有一个生效，设备只删一次（CASE-RECLAIM-7）。
+
+**怎么判定在用**（CASE-RECLAIM-10～12）。判定是 aq-core 的纯函数（`usage`）：输入进程列表（进程号、父进程号、可执行文件路径、argv、是否 aq 后代）和设备 id；aq-sys 只负责列进程，用 `KERN_PROCARGS2` 读完整 argv。
+
+| 设备 | 算在用 | 不算 |
+| --- | --- | --- |
+| `ios-sim`、`ios-device` | 有进程的启动参数里整段带着该 UDID，含 `platform=iOS Simulator,id=<UDID>` 这种写法（xcodebuild、agent-device 的 runner） | 设备自身进程：可执行文件在 `…/CoreSimulator/Devices/<UDID>/…` 下（装进模拟器的 App、UI 测试 runner）；参数里的 UDID 只出现在 `CoreSimulator/Devices/<UDID>` 路径里（模拟器的 launchd_sim） |
+| `android-emu`、`android-device` | 有进程的参数里整段带着该 serial（`emulator-5600` 不匹配 `emulator-56001`） | emulator、qemu 本体 |
+| 任意设备 | `aq run` 的参数里整段带着该借用的设备 id：提交时，以及排队、运行期间每次检查都算 | aq 自己及 aq 后代进程（含 aq 为借用起的进程）：`aq run` 的命令由左边一格按账本判定 |
+| `browser`、`desktop` | 这次不做在用探测 | — |
+
+- 整段：设备 id 前后紧挨的字符都不是字母、数字、`-`、`_`；不分大小写。
+- aq 后代：可执行文件名为 `aq` 的进程及其所有后代。例外是别的账本里执行命令的 runner（`__runner ex_…`）：如用 `aq run` 跑 aq 自己的测试时外层那个，算它的话它下面的所有进程都会被当成 aq 的。借用的 runner、对账进程只起设备管理工具，哪个账本的都算。
+- 只在有借出的 iOS、Android 设备时才列进程；每台 Android 设备每次检查多一次 adb 调用（限时 3 秒）。
+
+为什么这样定：原设计写「使用设备的工具每次操作时更新 `.used`」，但 agent-device、xcodebuild 都不知道这个文件，实际没人更新，在用的设备到阈值也会被收回；反过来借了不用的设备要等 2 小时。改成 aq 自己看进程：agent-device 的 iOS runner（xcodebuild `test-without-building … -destination platform=iOS Simulator,id=<UDID>`）在会话期间一直活着，参数里带 UDID；Android 上会话期间一直有 `adb -s <serial> shell am instrument …`（本机 2026-11-19 实测，agent-device 0.21.39）。
+
+代价：
+
+- 一直开着、没人操作的会话（agent-device 不 close）一直算在用，由借出上限兜住。agent-device close 之后 iOS runner 默认还留 5 分钟（`AGENT_DEVICE_IOS_RUNNER_IDLE_STOP_MS`，0.21.39），这段时间也算在用，闲置计时从 runner 退出才开始（2026-11-19 实机）。
+- 两次检查之间就结束的进程看不到：不开 agent-device 会话、直接用一条条 adb 命令操作 Android 时，会按闲置收回。agent-device 会话开着时一直有带 serial 的进程（iOS 是 runner，Android 是 `am instrument`），所以“在用”的实际含义是会话开着，会话关了才开始计闲置。
+- 每次检查要列一遍全部进程，都在检查的数据库事务里；本机约 1000 个进程时一次约 11 毫秒（列进程、标 aq 后代、判定一台设备，5 次取最快，`inuse::probe_cost_is_recorded`，2026-11-19）。
+- 阈值 30 分钟、上限 4 小时是假设：看 aq.log 里「闲置」「超过借用上限」的收回之后，使用方是否马上又借同一类设备（说明收早了）。
 
 ### 5.6 进程与崩溃安全
 
@@ -408,7 +433,7 @@ aq release <借用id>
 
 - `--` 后面的命令原样执行，不经过 shell；需要管道、`&&` 时写成 `-- sh -c '…'`（CASE-RUN-3）。
 - 在哪个目录调用，就在哪个目录执行。
-- aq 不检查命令里用了哪台设备；只用借到的设备 id 是 agent 的约定，写在 `skills/aq/SKILL.md`。
+- aq 不检查命令里用了哪台设备；只用借到的设备 id 是 agent 的约定，写在 `skills/aq/SKILL.md`。参数里带着借到的设备 id 时，只用来刷新该借用的使用时间（5.5）。
 - 输出和交互只用英文：JSON 的 `message`、拒绝原因、`--human`、`--top`、`--help`、stderr 报错、aq.log（CASE-LANG-1～3）。用户自己写的目录和参数原样回显。不改的：给 AI 做资源评估的提示词（不对外，改了会影响评估结果）；命令签名里的 `<路径>` 占位（参与资源评估缓存的键，改了会让已有实测失效）。
 - `--human` 输出给人看的文本：执行所在目录、内容指纹、队位、在等什么、评估来源、借用者、状态目录（CASE-STATUS-4）。
 - `--top` 是给人旁观和演示用的英文仪表盘：CPU、内存、磁盘占用条和重任务名额条，每个活动的执行、借用一行；终端里每 0.5 秒原地重画，输出不是终端时只画一帧。只读，用手写的 ANSI 控制码，不引入终端界面库（CASE-STATUS-6）。
@@ -531,7 +556,7 @@ ids = []
 ${XDG_STATE_HOME:-~/.local/state}/aq/
 ├── aq.db                  账本，SQLite，WAL 模式
 ├── locks/<id>.lock        runner 持有的文件锁；ai-<签名>.lock / .failed 是 AI 评估的互斥与失败标记
-├── holds/<借用id>.used    修改时间 = 最近一次使用
+├── holds/<借用id>.used    修改时间 = 最近一次探测到在用（5.5）
 ├── logs/<执行id>.log      命令的 stdout + stderr
 ├── runner.err             runner 和清理进程自己的 stderr
 └── aq.log                 aq 自身的状态转移与诊断日志，每行一个 JSON，超过 50MB 滚动
@@ -628,7 +653,7 @@ stateDiagram-v2
   waiting --> released: 撤销排队
   waiting --> rejected: 创建失败或需求超整机
   held --> released: aq release
-  held --> reclaimed: 借用者退出或闲置超限
+  held --> reclaimed: 借用者退出、闲置或超过借用上限
 ```
 
 排队中的 runner 意外消失时重新拉起，保持排队位置；借用的 runner 先删本借用的半成品再重拉。进入终态后不再变化；只有终态执行的实测参与资源估计。
@@ -662,7 +687,7 @@ stateDiagram-v2
 | 卡在 running | `--human` 看进程组是否还在；`ps -g <pgid>` |
 | 变成 interrupted | `grep <id> aq.log` 看原因；`runner.err` 看 runner 为什么退出 |
 | 借用一直 waiting | `SELECT * FROM hold_devices; SELECT * FROM hold_accounts;` 看谁占着；模拟器按内存放，看 `mem_pct` |
-| 借用被 reclaimed | `grep <id> aq.log` 的原因：借用者已退出或闲置超限；`owner_pid` 是借用者 |
+| 借用被 reclaimed | `grep <id> aq.log` 的原因：借用者已退出（holder process exited）、闲置（idle past the limit）或超过借用上限（held past the max hold time）；`owner_pid` 是借用者 |
 | 返回 busy | `lsof aq.db` 找长时间持有写锁的进程 |
 | 没有复用 | 比较两次的 `fingerprint`、`cwd`、`argv`；`--fresh` 和不在 git 里 hash 为空 |
 
@@ -703,7 +728,8 @@ stateDiagram-v2
 | `AQ_SYS_OVERRIDE` | JSON 文件，覆盖物理内存、可用内存、剩余磁盘、CPU、内存压力（`pressure`：normal/warn/critical）、换出（`swapping`） | 不设 |
 | `AQ_T_PRESSURE_WARN_S` | 内存压力挡住多久后加说明 | 600 |
 | `AQ_T_POLL_MS` | 读库、检查的间隔上限 | 1000 |
-| `AQ_T_IDLE_RECLAIM_S` | 闲置多久收回 | 7200 |
+| `AQ_T_IDLE_RECLAIM_S` | 闲置多久收回 | 1800 |
+| `AQ_T_MAX_HOLD_S` | 借出多久不管是否在用都收回 | 14400 |
 | `AQ_T_TIMEOUT_MIN_S` / `AQ_T_TIMEOUT_MAX_S` | 超时上下限 | 1800 / 7200 |
 | `AQ_T_KILL_GRACE_MS` | SIGTERM 后多久 SIGKILL | 10000 |
 | `AQ_T_AI_TIMEOUT_S` | AI 评估时限 | 60 |
@@ -743,7 +769,7 @@ stateDiagram-v2
 | 局限 | 影响 | 缓解 |
 | --- | --- | --- |
 | 重任务名额、磁盘底线默认值固定（2 个、50G） | 核数少的机器可能过载 | 在配置里按本机改；内存容量已按物理内存推出 |
-| 只有 Claude Code、Codex 在已验证表里 | 其他 agent 的命令没有 AI 评估缓存，第一次执行按首次见到放行；借用者认不出时只按闲置收回 | 配置 `ai_cli`；新 agent 验证后进表 |
+| 只有 Claude Code、Codex 在已验证表里 | 其他 agent 的命令没有 AI 评估缓存，第一次执行按首次见到放行；借用者认不出时只按闲置和借出上限收回 | 配置 `ai_cli`；新 agent 验证后进表 |
 | 用 setsid 脱离进程组的子进程 | 命令结束时不等它；它的父进程退出后用量统计不到（CASE-RUN-10） | — |
 | 嵌套的 agent（一个 agent 启动另一个） | 环境变量同时带两种 agent 的标记，可能认成外层 agent | — |
 | 新建并启动一台 iOS 模拟器约需 30 秒 | 借模拟器有固定开销 | 需要时再做预热副本 |

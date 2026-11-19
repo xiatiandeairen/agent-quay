@@ -20,6 +20,7 @@ pub fn snapshot(c: &Connection, now_ms: i64) -> Result<Snapshot> {
             started_at: e.started_at,
             res: e.res,
             timeout_s: e.timeout_s,
+            argv: e.argv,
         })
         .collect();
     let holds = active_holds(c)?
@@ -33,5 +34,5 @@ pub fn snapshot(c: &Connection, now_ms: i64) -> Result<Snapshot> {
             owner: h.owner,
         })
         .collect();
-    Ok(Snapshot { now_ms, execs, holds, devices: devices(c)?, accounts: accounts(c)? })
+    Ok(Snapshot { now_ms, execs, holds, devices: devices(c)?, accounts: accounts(c)?, submitting: vec![] })
 }

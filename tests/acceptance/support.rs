@@ -170,6 +170,11 @@ impl Env {
         cmd.spawn().expect("spawn")
     }
 
+    /// aq 之外一个在用设备的进程：参数里带着 `platform=iOS Simulator,id=<id>`（像 xcodebuild、agent-device 的 runner），常驻到被杀。
+    pub fn using_device(&self, id: &str) -> std::process::Child {
+        self.as_process("devuser", &[], &format!("sleep 300; echo 'platform=iOS Simulator,id={id}'"))
+    }
+
     /// 给之后运行的 aq 加一个环境变量。
     pub fn env(&self, k: &str, v: &str) -> &Self {
         self.extra.borrow_mut().push((k.into(), v.into()));

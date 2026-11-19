@@ -45,6 +45,7 @@ impl Tuning {
         let d = Limits::default();
         let lim = Limits {
             idle_reclaim_ms: env_i64("AQ_T_IDLE_RECLAIM_S").map_or(d.idle_reclaim_ms, |s| s * 1000),
+            max_hold_ms: env_i64("AQ_T_MAX_HOLD_S").map_or(d.max_hold_ms, |s| s * 1000),
             timeout_min_s: env_i64("AQ_T_TIMEOUT_MIN_S").unwrap_or(d.timeout_min_s),
             timeout_max_s: env_i64("AQ_T_TIMEOUT_MAX_S").unwrap_or(d.timeout_max_s),
         };
@@ -133,7 +134,7 @@ impl Ctx {
         self.procs.ancestors(ppid).into_iter().find(|(_, name, _)| *name == v.argv0)
     }
 
-    /// 借用结束：删掉 .used（agent-device 据此发现已收回）和 Stop hook 的 .reminded 标记。
+    /// 借用结束：删掉 .used（使用方据此发现已收回）和 Stop hook 的 .reminded 标记。
     pub fn clear_hold_files(&self, id: &str) {
         for f in [self.dirs.used_file(id), self.dirs.holds.join(format!("{id}.reminded"))] {
             let _ = std::fs::remove_file(f); // 文件不在就算已删

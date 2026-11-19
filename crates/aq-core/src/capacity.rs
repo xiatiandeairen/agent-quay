@@ -80,8 +80,10 @@ impl Default for Capacity {
 /// 时间阈值。验收测试通过环境变量缩短，正式值见各字段注释。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Limits {
-    /// 闲置多久收回借用：2 小时。
+    /// 设备连续多久没人用就收回借用：30 分钟（design.md 5.5）。
     pub idle_reclaim_ms: i64,
+    /// 借出多久不管是否在用都收回：4 小时（CASE-RECLAIM-9）。
+    pub max_hold_ms: i64,
     /// 超时下限 30 分钟、上限 2 小时。
     pub timeout_min_s: i64,
     pub timeout_max_s: i64,
@@ -89,6 +91,6 @@ pub struct Limits {
 
 impl Default for Limits {
     fn default() -> Self {
-        Limits { idle_reclaim_ms: 2 * 3600 * 1000, timeout_min_s: 1800, timeout_max_s: 7200 }
+        Limits { idle_reclaim_ms: 30 * 60 * 1000, max_hold_ms: 4 * 3600 * 1000, timeout_min_s: 1800, timeout_max_s: 7200 }
     }
 }

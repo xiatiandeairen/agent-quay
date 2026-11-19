@@ -39,7 +39,7 @@ str_enum!(Reason {
     DeviceUnavailable => "device_unavailable",
 });
 
-str_enum!(ReclaimReason { OwnerExit => "owner_exit", Idle => "idle" });
+str_enum!(ReclaimReason { OwnerExit => "owner_exit", Idle => "idle", MaxHold => "max_hold" });
 
 impl ExecStatus {
     pub fn is_terminal(self) -> bool {
@@ -78,6 +78,13 @@ impl DeviceType {
     /// browser 是一个 agent-browser 会话（独立 Chrome），desktop 是一个 agent-desktop 会话名，都可多个 agent 同时借。
     pub fn is_virtual(self) -> bool {
         !matches!(self, DeviceType::IosDevice | DeviceType::AndroidDevice)
+    }
+    /// aq 能探测是否在用的设备（看进程参数，design.md 5.5）；浏览器、桌面会话不探测。
+    pub fn usage_probed(self) -> bool {
+        !matches!(self, DeviceType::Browser | DeviceType::Desktop)
+    }
+    pub fn is_android(self) -> bool {
+        matches!(self, DeviceType::AndroidEmu | DeviceType::AndroidDevice)
     }
 }
 
@@ -122,6 +129,8 @@ pub struct ExecView {
     pub res: Option<Resources>,
     pub timeout_s: Option<i64>,
     pub pgid: Option<ProcId>,
+    /// 命令原文：参数里带着借到的设备 id 时刷新该借用（CASE-RECLAIM-10）。
+    pub argv: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

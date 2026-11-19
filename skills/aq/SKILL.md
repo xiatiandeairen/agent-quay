@@ -5,18 +5,17 @@ description: aq 排队：在本机跑编译或测试（xcodebuild、swift build/
 
 # aq
 
-这台 Mac 上同时有多个 agent 在编译、测试、用设备。aq 负责排队、合并重复的编译、分配设备和账号；所有人都经过它，机器才不会被压垮、设备才不会被抢。输出每个对象一行 JSON，按 `status` 决定下一步。命令写法以 `aq --help`、`aq <子命令> --help` 为准。
+这台 Mac 上同时有多个 agent 在编译、测试、用设备，都经过 aq 排队和分配，机器才不会被压垮、设备才不会被抢。输出每个对象一行 JSON，按 `status` 决定下一步。命令写法以 `aq --help`、`aq <子命令> --help` 为准。
 
 ## 常用命令写成脚本
 
-aq 按「代码指纹 + 执行目录 + 命令原文」判断是不是同一次执行，按「仓库 + 命令签名」积累资源历史。命令原文固定，别的 agent 跑同一件事才能共用结果，估算也越跑越准。
+命令原文固定，别的 agent 跑同一件事时才能共用结果，资源估算也越跑越准。
 
 - 命令本身短而固定（如 `cargo test`）就直接用。
 - 先用项目已有入口：`just`、`make`、`npm run` 等 → `aq run -- just test`。
 - 没有就在仓库 `scripts/` 下建脚本，一个用途一个（如 `scripts/build.sh`、`scripts/test.sh`），设备 id 等变化的值从脚本参数传入。新建脚本提交前先问用户。
-- 脚本放在被 git 跟踪或未忽略的位置：aq 的代码指纹只看这些文件，放在忽略目录或仓库外，改了脚本 aq 也察觉不到。
+- 脚本放在仓库里被 git 跟踪或未忽略的位置：放在忽略目录或仓库外，改了脚本 aq 察觉不到，可能把你并进别人正在跑的旧版本。
 - 管道、`&&`、环境变量写进脚本里；`aq run` 不经过 shell。
-- 改脚本后第一次运行会重新评估资源，属正常。
 
 ## 跑编译或测试
 
@@ -31,18 +30,18 @@ aq 按「代码指纹 + 执行目录 + 命令原文」判断是不是同一次�
 
 这一步结束的标准：每个 id 都拿到终态（ok / failed / timeout / interrupted / cancelled / rejected）。还在 queued、running 时不下结论。
 
-`reused: true` 表示别人正在跑同一份代码的同一条命令，你共用它的结果；需要单独跑时加 `--fresh`。不要的任务用 `aq cancel <id>`：运行中的会等到进程组结束再返回 `cancelled`（最多十几秒）；返回 `running` 且带 `cancel_requested: true` 时，稍后用 `aq status <id>` 读回终态。
+`reused: true` 表示别人正在跑同一份代码的同一条命令，你共用它的结果；需要单独跑时加 `--fresh`。不要的任务用 `aq cancel <id>`；返回 `running` 且带 `cancel_requested: true` 时，稍后用 `aq status <id>` 读回终态。
 
 ## 借设备和账号
 
-1. `aq hold <设备类型>... [--account <账号名>]...`，设备类型：`ios-sim`、`android-emu`、`ios-device`、`android-device`、`browser`、`desktop`；要几台写几次。`browser`、`desktop` 可以多个 agent 同时借，只按内存排队。整组一次借到，或整组排队。
+1. `aq hold <设备类型>... [--account <账号名>]...`，设备类型：`ios-sim`、`android-emu`、`ios-device`、`android-device`、`browser`、`desktop`；要几台写几次。整组一次借到，或整组排队。
    - `waiting`：`aq status <借用id> --wait <秒>` 等到 `held`。
    - 真机（`ios-device`、`android-device`）只借用户在 `~/.config/aq/config.toml` 的 `[ios-device]`、`[android-device]` 段 `ids` 里登记过、此刻连得上的（有线或同网无线都算）。没登记的手机可能是用户自用的，aq 不会借出；这个文件只由用户改，你不要改。
 2. 只操作返回的 `devices[].id` 和 `accounts`：
    - xcodebuild 用 `-destination id=<id>`；simctl 用 `<id>`；adb 用 `-s <id>`。
    - browser：`agent-browser --session <id> ...`，aq 已经把这个会话的 Chrome 开好；desktop：`agent-desktop --session <id> ...`，保持默认无窗口模式。
-   - 模拟器和浏览器会话由 aq 新建和删除，你只用它给的这些，不要自己 `close`。
-3. 验证结束立即 `aq release <借用id>`，看到 `released` 才算这一步结束；模拟器和浏览器会话随后几秒内由 aq 在后台删除。借用者进程退出或闲置 2 小时也会被收回（`reclaimed`），那只是兜底。
+   - 模拟器和浏览器会话由 aq 新建和删除，你只用它给的这些，不要自己删除模拟器、关闭这些浏览器会话。
+3. 验证结束立即 `aq release <借用id>`，看到 `released` 才算这一步结束。没还的设备 aq 也会收回（`reclaimed`），那只是兜底，不能代替 release。
 
 ## 找回和查看
 
@@ -54,7 +53,7 @@ aq 按「代码指纹 + 执行目录 + 命令原文」判断是不是同一次�
 | 情况 | 怎么办 |
 | --- | --- |
 | `waiting_for` 含 `disk_full` | 磁盘不够，等运行中的任务结束也腾不出来。把 `message` 转告用户（还差多少 GB、需要清理磁盘）；不想等就 `aq cancel <id>`。不要绕过 aq 直接跑 |
-| 带 `blocked_by` | 你要的资源被排头 `<id>` 预留着，排头开始后你就会跟着放行；想知道排头在等什么用 `aq status <排头id>` |
+| 带 `blocked_by` | 你要的资源被排在前面的 `<id>` 占着，它开始后就轮到你，接着等即可 |
 | `rejected` + `usage` | 写法不对（缺 `--`、设备类型拼错、id 不存在），改调用 |
 | `rejected` + `unschedulable` | 需求超过整机容量，或真机比登记的多，永远等不到；告诉用户 |
 | `rejected` + `device_unavailable` | 登记过的真机此刻连不上：把 `unavailable[].name` 和 `why` 告诉用户，请用户连上后再借 |

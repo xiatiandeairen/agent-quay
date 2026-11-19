@@ -3,7 +3,9 @@
 
 use aq_core::model::ProcId;
 use aq_core::ports::Procs;
+use aq_core::usage::ProcInfo;
 
+const PROC_ALL_PIDS: u32 = 1;
 const PROC_PGRP_ONLY: u32 = 2;
 const PROC_PPID_ONLY: u32 = 6;
 
@@ -35,36 +37,92 @@ fn cstr(buf: &[libc::c_char]) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
+/// 读进程的 KERN_PROCARGS2 到 buf（buf 长度不小于 kern.argmax），返回实际字节数。别的用户的进程读不到。
+fn procargs_into(pid: i32, buf: &mut [u8]) -> Option<usize> {
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
+    let mut size: libc::size_t = buf.len();
+    // SAFETY: buf 有 size 字节可写。
+    if unsafe { libc::sysctl(mib.as_mut_ptr(), 3, buf.as_mut_ptr().cast(), &raw mut size, std::ptr::null_mut(), 0) } != 0 || size < 8 {
+        return None;
+    }
+    Some(size)
+}
+
+/// kern.argmax：KERN_PROCARGS2 最多返回多少字节。
+fn argmax() -> usize {
+    let mut v: libc::c_int = 0;
+    let mut size: libc::size_t = std::mem::size_of::<libc::c_int>();
+    let mut mib = [libc::CTL_KERN, libc::KERN_ARGMAX];
+    // SAFETY: v 是 c_int 大小的可写缓冲区。
+    let rc = unsafe { libc::sysctl(mib.as_mut_ptr(), 2, (&raw mut v).cast(), &raw mut size, std::ptr::null_mut(), 0) };
+    if rc == 0 && v > 0 {
+        v as usize
+    } else {
+        1024 * 1024
+    }
+}
+
+/// 解析 KERN_PROCARGS2：argc（4 字节）| 可执行路径 \0 | 填充 \0 | argv[0] \0 … argv[argc-1] \0 | 环境变量…（不读）。
+fn parse_procargs(buf: &[u8]) -> Option<(String, Vec<String>)> {
+    let argc = i32::from_ne_bytes(buf.get(..4)?.try_into().ok()?).max(0) as usize;
+    let rest = buf.get(4..)?;
+    let exe_end = rest.iter().position(|b| *b == 0)?;
+    let exe = String::from_utf8_lossy(&rest[..exe_end]).into_owned();
+    let after = &rest[exe_end..];
+    let start = after.iter().position(|b| *b != 0).unwrap_or(after.len());
+    let argv = after[start..].split(|b| *b == 0).take(argc).map(|a| String::from_utf8_lossy(a).into_owned()).collect();
+    Some((exe, argv))
+}
+
 /// argv[0] 的文件名（KERN_PROCARGS2）。Claude Code 会把进程名改成版本号（如 2.1.322），
 /// 可执行文件也按版本命名，只有 argv[0] 还是 "claude"，所以按它识别借用者。
 fn argv0_name(pid: i64) -> Option<String> {
     let pid = i32::try_from(pid).ok()?;
-    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
-    let mut size: libc::size_t = 0;
-    // SAFETY: 先查所需大小，oldp 为空。
-    if unsafe { libc::sysctl(mib.as_mut_ptr(), 3, std::ptr::null_mut(), &raw mut size, std::ptr::null_mut(), 0) } != 0 || size < 8 {
-        return None;
-    }
-    let mut buf = vec![0u8; size];
-    // SAFETY: buf 有 size 字节可写。
-    if unsafe { libc::sysctl(mib.as_mut_ptr(), 3, buf.as_mut_ptr().cast(), &raw mut size, std::ptr::null_mut(), 0) } != 0 {
-        return None;
-    }
-    buf.truncate(size);
-    // 布局：argc（4 字节）| 可执行路径 \0 | 填充 \0 | argv[0] \0 | …
-    let rest = buf.get(4..)?;
-    let exe_end = rest.iter().position(|b| *b == 0)?;
-    let after = &rest[exe_end..];
-    let start = after.iter().position(|b| *b != 0)?;
-    let arg0 = after[start..].split(|b| *b == 0).next()?;
-    let s = String::from_utf8_lossy(arg0);
+    let mut buf = vec![0u8; argmax()];
+    let n = procargs_into(pid, &mut buf)?;
+    let (_, argv) = parse_procargs(&buf[..n])?;
+    let s = argv.into_iter().next()?;
     let base = s.rsplit('/').next().unwrap_or(&s).trim_start_matches('-').to_string();
     (!base.is_empty()).then_some(base)
 }
 
+/// 本机所有进程（进程号、父进程号、可执行文件路径、argv），供判定设备是否在用（design.md 5.5）。
+/// 读不到 argv 的（别的用户的进程）argv 为空；`aq_descendant` 由 aq-core 的 usage 模块填。
+pub fn list_all() -> Vec<ProcInfo> {
+    let mut buf = vec![0u8; argmax()];
+    let mut out = vec![];
+    for pid in list_pids(PROC_ALL_PIDS, 0) {
+        let Some(info) = bsdinfo(i64::from(pid)) else { continue };
+        let parsed = procargs_into(pid, &mut buf).and_then(|n| parse_procargs(&buf[..n]));
+        let (exe, argv) = parsed.unwrap_or_else(|| (pid_path(pid), vec![]));
+        out.push(ProcInfo { pid: i64::from(pid), ppid: i64::from(info.pbi_ppid), exe, argv, aq_descendant: false });
+    }
+    out
+}
+
+/// 可执行文件路径（proc_pidpath）；读不到为空。
+fn pid_path(pid: i32) -> String {
+    let mut buf = vec![0u8; 4 * 1024];
+    // SAFETY: buf 有 len 字节可写。
+    let n = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
+    if n <= 0 {
+        return String::new();
+    }
+    buf.truncate(n as usize);
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
 fn list_pids(kind: u32, arg: i64) -> Vec<i32> {
     let Ok(arg) = u32::try_from(arg) else { return vec![] };
-    let mut buf = vec![0i32; 1024];
+    // 全部进程时按系统给的数量再留余量；进程组、子进程 1024 个够用
+    let cap = if kind == PROC_ALL_PIDS {
+        // SAFETY: buffer 为空时只返回所需字节数。
+        let need = unsafe { libc::proc_listpids(kind, arg, std::ptr::null_mut(), 0) };
+        (need.max(0) as usize / std::mem::size_of::<i32>()) + 256
+    } else {
+        1024
+    };
+    let mut buf = vec![0i32; cap];
     let bytes = (buf.len() * std::mem::size_of::<i32>()) as i32;
     // SAFETY: buf 有 bytes 字节可写。
     let n = unsafe { libc::proc_listpids(kind, arg, buf.as_mut_ptr().cast(), bytes) };

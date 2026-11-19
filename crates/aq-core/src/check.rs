@@ -1,7 +1,7 @@
 //! 所有命令共用的「检查」：plan(快照, 探测结果) → 动作。
 //! 同样的输入永远得到同样的输出；IO 由 app 层按动作执行。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::admit::{admit, AdmitResult, Demand, Item, Ledger, SysSample};
 use crate::capacity::{Capacity, Limits};
@@ -14,6 +14,8 @@ pub struct Snapshot {
     pub holds: Vec<HoldView>,
     pub devices: Vec<DeviceRow>,
     pub accounts: Vec<AccountRow>,
+    /// 这次检查同一事务里正要提交的 `aq run` 命令（没有时为空）：参数带着借到的设备 id 时提交那一刻就算在用（CASE-RECLAIM-10）。
+    pub submitting: Vec<String>,
 }
 
 /// 探测结果（app 层在事务里采集）。缺省视为「还活着/还在用」，宁可不收回也不误收回。
@@ -29,6 +31,8 @@ pub struct Probes {
     pub owner_alive: HashMap<String, bool>,
     /// holds/<id>.used 的修改时间；没有文件时用 acquired_at。
     pub last_used_at: HashMap<String, i64>,
+    /// 此刻探测到有 aq 之外的进程在用的借用 id（usage 模块判定，design.md 5.5）。
+    pub in_use: HashSet<String>,
     pub sys: SysSample,
 }
 
@@ -41,6 +45,8 @@ pub enum Action {
     /// 等待中的借用 runner 消失 → 先删半成品模拟器和已分配的行，再重新拉起。
     RespawnHold(String),
     Reclaim(String, ReclaimReason),
+    /// 借用此刻在用：把 holds/<id>.used 改成现在（CASE-RECLAIM-4）。
+    MarkUsed(String),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -68,17 +74,37 @@ fn recover_execs(s: &Snapshot, p: &Probes, out: &mut Vec<Action>) {
     }
 }
 
+/// 这组借用的设备 id 出现在排队、运行中或正要提交的 aq run 参数里（CASE-RECLAIM-10）。
+fn named_by_run(s: &Snapshot, ids: &[&str]) -> bool {
+    let live = s.execs.iter().filter(|e| !e.status.is_terminal()).map(|e| e.argv.as_slice());
+    std::iter::once(s.submitting.as_slice()).chain(live).any(|argv| ids.iter().any(|id| crate::usage::argv_mentions(argv, id)))
+}
+
+/// 收回原因，按「借用者退出 → 超过借用上限 → 闲置」取第一个（CASE-RECLAIM-9）。
+fn reclaim_reason(h: &HoldView, s: &Snapshot, p: &Probes, lim: &Limits, used: bool) -> Option<ReclaimReason> {
+    if !p.owner_alive.get(&h.id).copied().unwrap_or(true) {
+        return Some(ReclaimReason::OwnerExit);
+    }
+    let acquired = h.acquired_at.unwrap_or(s.now_ms);
+    if s.now_ms - acquired >= lim.max_hold_ms {
+        return Some(ReclaimReason::MaxHold);
+    }
+    // 只有浏览器、桌面会话的借用探测不到使用，不按闲置收回（design.md 5.5）
+    let probed = s.devices.iter().any(|d| d.hold_id == h.id && d.dtype.usage_probed());
+    let last = p.last_used_at.get(&h.id).copied().unwrap_or(acquired);
+    (probed && !used && s.now_ms - last >= lim.idle_reclaim_ms).then_some(ReclaimReason::Idle)
+}
+
 fn reclaim_holds(s: &Snapshot, p: &Probes, lim: &Limits, out: &mut Vec<Action>) {
     for h in &s.holds {
         match h.status {
             HoldStatus::Held => {
-                if !p.owner_alive.get(&h.id).copied().unwrap_or(true) {
-                    out.push(Action::Reclaim(h.id.clone(), ReclaimReason::OwnerExit));
-                    continue;
-                }
-                let last = p.last_used_at.get(&h.id).copied().or(h.acquired_at).unwrap_or(s.now_ms);
-                if s.now_ms - last >= lim.idle_reclaim_ms {
-                    out.push(Action::Reclaim(h.id.clone(), ReclaimReason::Idle));
+                let ids: Vec<&str> = s.devices.iter().filter(|d| d.hold_id == h.id).filter_map(|d| d.device.as_deref()).collect();
+                let used = p.in_use.contains(&h.id) || named_by_run(s, &ids);
+                match reclaim_reason(h, s, p, lim, used) {
+                    Some(why) => out.push(Action::Reclaim(h.id.clone(), why)),
+                    None if used => out.push(Action::MarkUsed(h.id.clone())),
+                    None => {}
                 }
             }
             HoldStatus::Waiting if gone(p, &h.id) => out.push(Action::RespawnHold(h.id.clone())),

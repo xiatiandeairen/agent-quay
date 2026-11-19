@@ -60,7 +60,7 @@ fn locate(ctx: &Ctx, a: &RunArgs) -> AppResult<Located> {
 /// 检查永远不会把「刚拉起还没拿锁」的 runner 当成已消失；提交后、拉起前被杀，锁随进程释放，下次检查会重拉。
 fn submit(ctx: &Ctx, store: &mut Store, a: &RunArgs, l: &Located) -> AppResult<(String, bool)> {
     let (id, lock) = store.tx(|c| {
-        check::check_in(ctx, c, None)?;
+        check::check_submitting(ctx, c, None, &a.argv)?;
         if let Some(h) = &l.hash {
             if let Some(id) = aq_store::find_inflight(c, h)? {
                 return Ok::<_, AppError>((id, None));

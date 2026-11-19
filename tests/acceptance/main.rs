@@ -6,6 +6,7 @@ mod dbflow;
 mod estimate;
 mod faults;
 mod hold;
+mod inuse;
 mod lang;
 mod ledgers;
 mod memory;

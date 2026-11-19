@@ -66,6 +66,7 @@ fn probe(ctx: &Ctx, s: &Snapshot, self_id: Option<&str>, guards: &mut HashMap<St
             _ => {}
         }
     }
+    p.in_use = super::usage::in_use(s);
     Ok(p)
 }
 
@@ -92,18 +93,26 @@ fn apply(ctx: &Ctx, c: &Conn, a: &Action, guards: &mut HashMap<String, File>) ->
                 let reason = match why {
                     ReclaimReason::OwnerExit => "holder process exited",
                     ReclaimReason::Idle => "idle past the limit",
+                    ReclaimReason::MaxHold => "held past the max hold time",
                 };
                 ctx.log_transition(id, "held", "reclaimed", reason);
                 return Ok(true);
             }
         }
+        Action::MarkUsed(id) => super::usage::mark_used(ctx, id),
     }
     Ok(false)
 }
 
 /// 在调用方已开的事务里做一次检查。
 pub fn check_in(ctx: &Ctx, c: &Conn, self_id: Option<&str>) -> AppResult<Checked> {
-    let snapshot = aq_store::snapshot(c, ctx.now())?;
+    check_submitting(ctx, c, self_id, &[])
+}
+
+/// 同 check_in；`submitting` 是同一事务里正要提交的 aq run 命令，参数带着借到的设备 id 时提交那一刻就算在用（CASE-RECLAIM-10）。
+pub fn check_submitting(ctx: &Ctx, c: &Conn, self_id: Option<&str>, submitting: &[String]) -> AppResult<Checked> {
+    let mut snapshot = aq_store::snapshot(c, ctx.now())?;
+    snapshot.submitting = submitting.to_vec();
     let mut guards = HashMap::new();
     let probes = probe(ctx, &snapshot, self_id, &mut guards)?;
     let plan = plan(&snapshot, &probes, &ctx.config.cap, &ctx.limits);
