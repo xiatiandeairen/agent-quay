@@ -200,20 +200,33 @@ fn idle_reclaim() {
     e.env("AQ_T_IDLE_RECLAIM_S", "2");
     let idle = e.aq(&["hold", "ios-device"]);
     let busy = e.aq(&["hold", "ios-sim"]);
+    let udid = busy.one()["devices"][0]["id"].as_str().unwrap().to_string();
     let used = e.state().join(format!("holds/{}.used", busy.id()));
+    let born = modified(&used);
+    let mut user = e.using_device(&udid); // aq 之外的进程参数里带着 UDID：一直在用
     for _ in 0..4 {
         std::thread::sleep(Duration::from_millis(800));
-        std::fs::File::create(&used).unwrap(); // CASE-RECLAIM-4 agent-device 持续使用
         e.aq(&["status"]);
     }
     assert_eq!(e.aq(&["status", &idle.id()]).status(), "reclaimed", "CASE-RECLAIM-4 闲置超限收回");
     assert_eq!(e.aq(&["status", &busy.id()]).status(), "held", "CASE-RECLAIM-4 一直在用不收回");
+    assert!(modified(&used) > born, "CASE-RECLAIM-4 探测到在用就刷新 .used");
+    let _ = user.kill();
+    let _ = user.wait();
+    std::thread::sleep(Duration::from_millis(3000));
+    assert_eq!(e.aq(&["status", &busy.id()]).status(), "reclaimed", "CASE-RECLAIM-4 没人用了按闲置收回");
+    assert!(e.aq_log().lines().any(|l| l.contains(&busy.id()) && l.contains("idle past the limit")), "收回原因为闲置");
+    assert!(!used.exists(), "CASE-RECLAIM-4 收回后 .used 不存在");
     let quiet = Env::new();
     quiet.env("AQ_T_IDLE_RECLAIM_S", "100");
     let h = quiet.aq(&["hold", "ios-device"]);
     std::thread::sleep(Duration::from_millis(1500));
     assert_eq!(quiet.aq(&["status", &h.id()]).status(), "held", "闲置不足上限不收回");
     assert!(!e.state().join(format!("holds/{}.used", idle.id())).exists(), "CASE-RECLAIM-4 收回后 .used 不存在");
+}
+
+fn modified(p: &std::path::Path) -> std::time::SystemTime {
+    std::fs::metadata(p).and_then(|m| m.modified()).unwrap_or_else(|e| panic!("{}: {e}", p.display()))
 }
 
 // CASE-FAULT-5

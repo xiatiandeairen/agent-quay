@@ -64,15 +64,16 @@ fn open_failure_rolls_back_group() {
     assert_eq!(e.q_i64("SELECT count(*) FROM hold_devices") + e.q_i64("SELECT count(*) FROM hold_accounts"), 0);
 }
 
-// CASE-RECLAIM-4
+// CASE-RECLAIM-4, CASE-RECLAIM-9
 #[test]
-fn idle_reclaim_closes_session() {
+fn browser_not_idle_reclaimed_but_max_hold_closes_session() {
     let e = Env::new();
-    e.env("AQ_T_IDLE_RECLAIM_S", "1");
+    e.env("AQ_T_IDLE_RECLAIM_S", "2").env("AQ_T_MAX_HOLD_S", "6");
     let r = e.aq(&["hold", "browser"]);
-    std::thread::sleep(Duration::from_millis(1200));
-    e.aq(&["status"]);
-    assert_eq!(e.aq(&["status", &r.id()]).status(), "reclaimed");
+    std::thread::sleep(Duration::from_millis(2500));
+    assert_eq!(e.aq(&["status", &r.id()]).status(), "held", "浏览器会话探测不到使用，不按闲置收回");
+    assert!(until(8, || e.aq(&["status", &r.id()]).status() == "reclaimed"), "超过借用上限收回");
+    assert!(e.aq_log().lines().any(|l| l.contains(&r.id()) && l.contains("held past the max hold time")));
     assert!(until(10, || e.browsers().is_empty()));
 }
 
