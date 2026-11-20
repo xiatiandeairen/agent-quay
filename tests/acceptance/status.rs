@@ -169,7 +169,7 @@ fn top_draws_one_frame_when_not_a_terminal() {
 fn reused_only_in_run_output() {
     let e = Env::new();
     let r = e.aq(&["run", "--wait", "0", "--", "fake-task", "--secs", "3"]);
-    assert_eq!(r.one()["reused"], false, "aq run 的返回带 reused");
+    assert!(r.one().get("reused").is_none(), "aq run 没共用时不带 reused：{}", r.stdout);
     let s = e.aq(&["status", &r.id()]);
     assert!(s.one().get("reused").is_none(), "status 不带 reused：{}", s.stdout);
     let all = e.aq(&["status"]);

@@ -14,7 +14,7 @@ fn merged(e: &Env, a: (&Path, &[&str]), b: (&Path, &[&str])) -> bool {
     bb.extend_from_slice(b.1);
     let rb = e.aq_in(b.0, &bb);
     let same = rb.id() == ra.id();
-    assert_eq!(rb.one()["reused"].as_bool(), Some(same));
+    assert_eq!(rb.one()["reused"].as_bool().unwrap_or(false), same, "共用时 reused=true，否则不带");
     e.aq(&["cancel", &ra.id()]);
     e.aq(&["cancel", &rb.id()]);
     same
@@ -175,7 +175,7 @@ fn fresh_and_finished() {
     let done = e.aq_in(&repo, &["run", "--", "true"]);
     let again = e.aq_in(&repo, &["run", "--", "true"]);
     assert_ne!(done.id(), again.id(), "CASE-REUSE-4/CASE-REUSE-4 已结束的不复用");
-    assert_eq!(again.one()["reused"], false);
+    assert!(again.one().get("reused").is_none());
 }
 
 // CASE-REUSE-1
@@ -202,7 +202,7 @@ fn many_worktrees_same_content_run_once() {
     let ids: std::collections::HashSet<String> = outs.iter().map(|o| o.id()).collect();
     assert_eq!(ids.len(), 1, "只执行一次");
     assert!(outs.iter().all(|o| o.status() == "ok"));
-    assert_eq!(outs.iter().filter(|o| o.one()["reused"] == false).count(), 1);
+    assert_eq!(outs.iter().filter(|o| o.one().get("reused").is_none()).count(), 1);
     assert_eq!(std::fs::read_to_string(&count).unwrap().lines().count(), 1, "计数文件 = 1");
 }
 

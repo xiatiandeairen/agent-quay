@@ -22,10 +22,10 @@ fn true_ok_with_log() {
     let e = Env::new();
     let r = e.aq(&["run", "--", "true"]);
     assert_eq!((r.code, r.status()), (0, "ok"), "{}", r.stdout);
-    assert_eq!(r.one()["reused"], false);
+    assert!(r.one().get("reused").is_none(), "没共用时不带 reused");
     assert!(std::path::Path::new(r.one()["log"].as_str().unwrap()).exists());
     let keys: Vec<&String> = r.one().as_object().unwrap().keys().collect();
-    assert_eq!(keys, ["id", "status", "reused", "log"], "CASE-STATUS-3 字段不多不少");
+    assert_eq!(keys, ["id", "status", "log"], "CASE-STATUS-3 字段不多不少");
 }
 
 // CASE-RUN-1
@@ -88,7 +88,7 @@ fn non_git_same_command_twice_not_merged() {
     let a = e.aq(&["run", "--wait", "0", "--", "fake-task", "--secs", "1"]);
     let b = e.aq(&["run", "--wait", "0", "--", "fake-task", "--secs", "1"]);
     assert_ne!(a.id(), b.id());
-    assert_eq!(b.one()["reused"], false);
+    assert!(b.one().get("reused").is_none(), "没共用时不带 reused");
     assert_eq!(e.q_i64("SELECT count(*) FROM executions WHERE hash IS NULL"), 2);
     let s = e.aq(&["status", &a.id(), &b.id(), "--wait", "20"]);
     assert_eq!(s.code, 0);
