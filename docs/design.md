@@ -22,7 +22,7 @@ aq 是单机上多个 AI agent 共用的排队与借还工具：agent 把编译�
 
 ```bash
 aq run -- xcodebuild -scheme App -destination 'generic/platform=iOS Simulator' build
-# → {"id":"ex_7f3a","status":"queued","retry_after_s":120}
+# → {"id":"ex_7f3a","status":"queued","next":"aq status ex_7f3a --wait 100"}
 aq status ex_7f3a --wait 100
 # → {"id":"ex_7f3a","status":"ok","log":"~/.local/state/aq/logs/ex_7f3a.log"}
 ```
@@ -456,7 +456,7 @@ aq release <借用id>
 | `mem_pressure_s` `message` | 在等内存压力回落 | 压力已持续的秒数；超过 10 分钟另加 `message` 说明，仍在排队（CASE-QUEUE-5） |
 | `waiting_for` | queued、waiting 且查得到原因 | 在等哪类资源：`heavy`、`mem`、`mem_pressure`、`cold_start`、`sim_slots`、`disk`、`disk_full`、`net`、`device:<类型>`、`account:<名字>`（CASE-QUEUE-5、CASE-QUEUE-6、CASE-QUEUE-8） |
 | `blocked_by` | queued、waiting 且自己放得下、只因排头预留没放行 | 挡住它的排头 id（CASE-QUEUE-3） |
-| `retry_after_s` | queued、running | 建议多少秒后再查，10–300，只是轮询建议 |
+| `next` | queued、running | 接着等的命令 `aq status <id> --wait <秒>`，秒数 10–100（不超过 Bash 默认 120 秒超时），按预计剩余时间给；照抄执行即可 |
 | `exit_code` | failed | 命令退出码 |
 | `log` | 命令已开始运行 | 输出日志路径 |
 | `content_changed` | 已结束且为 true | 结果对应的不是最新代码 |
@@ -480,7 +480,7 @@ aq release <借用id>
 | `devices` | held | 借到的设备，顺序与请求一致，每项 `{"type","id"}` |
 | `accounts` | held 且借了账号 | 借到的账号名 |
 | `missing` | held 且按 id 查询时有设备已不存在 | 已不存在的设备 id（被 aq 以外删掉、模拟器服务被重置）；借用状态不变，调用方自己决定归还重借（CASE-HOLD-11） |
-| `retry_after_s` | waiting | 同执行对象 |
+| `next` | waiting | 同执行对象 |
 | `reason` `message` | rejected | 同执行对象 |
 | `unavailable` | rejected device_unavailable | 登记了但此刻不可用的真机，每项 `{type,id,name,why}` |
 | `undeclared` `config_snippet` | rejected 且有已连接但没登记的真机 | 这些设备，以及可整段替换进配置的片段 |

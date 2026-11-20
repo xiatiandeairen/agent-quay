@@ -11,7 +11,7 @@ use super::ctx::Ctx;
 use super::error::{AppError, AppResult};
 use super::{check, view};
 
-/// 运行中任务里最早结束的剩余秒数（用于排队项的 retry_after_s）。
+/// 运行中任务里最早结束的剩余秒数（用于排队项 `next` 的等待秒数）。
 pub fn soonest_free_s(ctx: &Ctx, store: &Store) -> AppResult<Option<i64>> {
     let now = ctx.now();
     Ok(aq_store::active_execs(store.conn())?

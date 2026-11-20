@@ -19,10 +19,10 @@ pub fn exec_json(ctx: &Ctx, e: &ExecRow, reused: Option<bool>, soonest_free_s: O
     match e.status {
         ExecStatus::Running => {
             let elapsed = e.started_at.map_or(0, |s| (ctx.now() - s) / 1000);
-            m.insert("retry_after_s".into(), json!(retry::running(est.unwrap_or(60), elapsed)));
+            m.insert("next".into(), json!(retry::next(&e.id, retry::running(est.unwrap_or(60), elapsed))));
         }
         ExecStatus::Queued => {
-            m.insert("retry_after_s".into(), json!(retry::queued(soonest_free_s, est)));
+            m.insert("next".into(), json!(retry::next(&e.id, retry::queued(soonest_free_s, est))));
         }
         _ => {}
     }
@@ -55,7 +55,7 @@ pub fn hold_json(h: &HoldRow, devices: &[(String, String)]) -> Value {
             }
         }
         HoldStatus::Waiting => {
-            m.insert("retry_after_s".into(), json!(retry::queued(None, None)));
+            m.insert("next".into(), json!(retry::next(&h.id, retry::queued(None, None))));
         }
         HoldStatus::Rejected => {
             m.insert("reason".into(), json!("device_error"));

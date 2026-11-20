@@ -1,7 +1,14 @@
-//! retry_after_s：建议多久后再查，10–300 秒。只是轮询建议，不是完成时间承诺。
+//! `next` 里的 `--wait` 秒数：建议这次等多久，10–100 秒。只是等待建议，不是完成时间承诺。
+//! 上限 100 = aq 的默认 `--wait`，配 agent 的 Bash 默认 120 秒超时；更长会被 Bash 杀掉（会话记录里 `--wait 560` 被杀过）。
+//! 改成可直接执行的命令，是因为会话记录里 612 次返回的秒数没有一次被照着用（2026-11-20 分析）。
 
 pub const MIN_S: i64 = 10;
-pub const MAX_S: i64 = 300;
+pub const MAX_S: i64 = 100;
+
+/// 接着等的命令。
+pub fn next(id: &str, wait_s: i64) -> String {
+    format!("aq status {id} --wait {wait_s}")
+}
 
 /// 运行中：预计剩余时间。
 pub fn running(est_s: i64, elapsed_s: i64) -> i64 {
@@ -31,5 +38,6 @@ mod tests {
         assert_eq!(queued(None, None), 60);
         assert_eq!(queued(Some(10_000), None), MAX_S);
         assert_eq!(queued(Some(0), Some(0)), MIN_S);
+        assert_eq!(next("ex_1", 60), "aq status ex_1 --wait 60");
     }
 }

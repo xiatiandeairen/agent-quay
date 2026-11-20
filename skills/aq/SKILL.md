@@ -22,7 +22,7 @@ description: aq 排队：在本机跑编译或测试（xcodebuild、swift build/
 1. 在要执行的目录里提交：`aq run -- <脚本或命令> [参数...]`。
    - `run`、`hold` 默认最多等 100 秒（`--wait`；`status` 不加就不等），配合 Bash 默认 120 秒超时；你给 Bash 设了更长超时时，把 `--wait` 设成比它少 20 秒。
 2. 看 `status`：
-   - `queued` / `running`：`aq status <id> --wait <retry_after_s 或更长>` 接着等；也可以放后台跑。
+   - `queued` / `running`：执行返回里的 `next` 命令接着等；也可以放后台跑。
    - `ok`：继续。带 `content_changed: true` 时，结果可能不对应最新代码：只有你的代码在运行期间改过才需要重跑。
    - `failed`：读 `log` 里的输出修代码。`timeout`：看日志判断是卡住还是太慢。`interrupted`：环境问题，直接重试。
    - `rejected`：按 `reason` 处理（见「出错时」），或按退出码处理（见「退出码」）。

@@ -18,7 +18,7 @@
 | CASE-RUN-1 | `aq run -- <命令>`，命令分别成功、以 65 退出、不存在 | 依次为 ok（退出码 0）、failed 且 exit_code=65（退出码 1）、failed 且 exit_code=127；每次都有日志文件，内容是命令输出 | 集成 |
 | CASE-RUN-2 | 写法错误：`aq run` 不带命令、`hold` 不带设备或设备类型拼错、同一账号写两次、查询或撤销或归还不存在的 id（含已被保留策略清掉的） | rejected，reason=usage，退出码 3；账本不变 | 集成 |
 | CASE-RUN-3 | 在仓库子目录里提交；cwd 含空格和中文、参数含引号和换行 | 命令在调用目录原样执行，不经过 shell；同样的输入算出同样的 hash | 集成 |
-| CASE-RUN-4 | `--wait 0` 提交长任务；不带 `--wait` 提交 150 秒的任务；`--wait 86400` | 第一个 1 秒内返回 queued 或 running，带 10–300 的 retry_after_s；第二个在 100 秒时返回 running，之后 `aq status <id> --wait` 拿到 ok；第三个一直等到结束 | 集成 |
+| CASE-RUN-4 | `--wait 0` 提交长任务；不带 `--wait` 提交 150 秒的任务；`--wait 86400` | 第一个 1 秒内返回 queued 或 running，带 `next`：`aq status <id> --wait <10–100>`；第二个在 100 秒时返回 running，之后 `aq status <id> --wait` 拿到 ok；第三个一直等到结束 | 集成 |
 | CASE-RUN-5 | 任务排队或运行中，前台的 `aq run` 被杀（如 agent 的命令超时、按 Esc、关会话） | 任务照常跑完，`aq status <id>` 能拿到结果；执行进程的父进程是 1 | 集成；真实 Claude Code 会话按 Esc、关会话：实机 |
 | CASE-RUN-6 | 命令超过超时时间仍不退出 | 整个进程组被终止，状态为 timeout，资源释放，排队的任务接着开始 | 集成 |
 | CASE-RUN-7 | 任务运行中机器睡眠一段时间再唤醒 | 睡眠时间不计入超时，任务继续 | 集成 |
@@ -69,8 +69,8 @@
 | CASE-QUEUE-2 | 记账内存之和超过容量；aq 以外的程序占掉大量内存；磁盘低于底线；同时下载的任务名额已满 | 新任务排队等待，不失败；条件恢复后开始 | 单元；集成 |
 | CASE-QUEUE-3 | 排头在等某种资源，后来的任务分别要这种资源、不要这种资源（含编译和借用混排） | 不要的可以先开始；要的不插队，排头缺的资源不被后来者占走；被挡的任务带 `blocked_by: <排头 id>`，`waiting_for` 只列排头占着、它也要的那几类 | 单元；集成 |
 | CASE-QUEUE-4 | 排头在等用完会还的资源（重任务名额、内存、下载名额、设备、账号、靠等能等到的磁盘） | 最晚在当前运行任务的最长超时内开始；`disk_full` 不受这条约束，要人清理 | 集成 |
-| CASE-QUEUE-5 | 账面和实际余量都够；系统内存压力为 warn 或 critical；或距上次采样换出超过 64MB；压力回落 | 前者放行；后两者要内存的执行和借用都不放行（queued/waiting），`aq status <id>` 带 `waiting_for: ["mem_pressure"]` 和 `retry_after_s`，不要内存的（真机）照常借；回落后自动放行。被压力挡住时另带 `mem_pressure_s`（已持续秒数）；超过 10 分钟仍排队、不失败，另加 `message` 说明压力来自 aq 以外的程序 | 单元；集成 |
-| CASE-QUEUE-6 | 同时来 3 个借 ios-sim 的请求（每台建 2 秒以上） | 任何时刻最多一台 iOS 模拟器或 Android 实例在冷启动；其余 waiting，带 `waiting_for: ["cold_start"]` 和 `retry_after_s`；三台最终都借到。浏览器会话不受限 | 单元；集成；真 simctl：实机 |
+| CASE-QUEUE-5 | 账面和实际余量都够；系统内存压力为 warn 或 critical；或距上次采样换出超过 64MB；压力回落 | 前者放行；后两者要内存的执行和借用都不放行（queued/waiting），`aq status <id>` 带 `waiting_for: ["mem_pressure"]` 和 `next`，不要内存的（真机）照常借；回落后自动放行。被压力挡住时另带 `mem_pressure_s`（已持续秒数）；超过 10 分钟仍排队、不失败，另加 `message` 说明压力来自 aq 以外的程序 | 单元；集成 |
+| CASE-QUEUE-6 | 同时来 3 个借 ios-sim 的请求（每台建 2 秒以上） | 任何时刻最多一台 iOS 模拟器或 Android 实例在冷启动；其余 waiting，带 `waiting_for: ["cold_start"]` 和 `next`；三台最终都借到。浏览器会话不受限 | 单元；集成；真 simctl：实机 |
 | CASE-QUEUE-7 | 配置里没写 `mem`、`sim_slots`，物理内存 36G、16G、64G；写了；读不到物理内存 | 内存容量为物理内存 3/4（36G → 27G，16G → 12G），模拟器台数上限每 8G 一台（4、2、8 台，至少 1 台）；写了以配置为准；读不到时 28G、4 台 | 单元；集成 |
 | CASE-QUEUE-8 | 剩余 57G、底线 50G、排头要 12G、没有运行中任务，后面有 186MB 和 3G 的任务；另一种：运行中任务记账 8G、结束后就够 | 前者排头 `waiting_for: ["disk_full"]`，带英文 `message` 写明还差 5.0 GB、需要人清理磁盘；186MB 和 3G 的立即开始，不带 `blocked_by`。后者排头 `waiting_for: ["disk"]`，磁盘仍预留，后来要磁盘的带 `blocked_by` | 单元；集成 |
 | CASE-QUEUE-9 | 排头同时缺内存和等不到的磁盘；后面有要内存的任务、只要磁盘的任务 | 内存仍预留给排头：要内存的带 `blocked_by`；只要磁盘的放得下就开始 | 单元 |
@@ -93,7 +93,7 @@
 | CASE-HOLD-8 | `--wait 5` 返回 waiting 后再查 | 创建期间仍为 waiting 且内存已预留；建好后为 held，设备 id 已回填，闲置计时文件已建 | 集成 |
 | CASE-HOLD-9 | 同一台机器上两个账本（不同 `XDG_STATE_HOME`）各借 1 台 ios-sim 和 1 个浏览器会话，两边反复对账；账本 A 还有一台建好后崩溃没记账的半成品 | 两边借出的设备都还在；A 的半成品被 A 删掉；各自归还后各自删掉 | 单元；集成；真 simctl 两个实例：实机 |
 | CASE-HOLD-10 | 机器上有旧格式名字（不带账本标识）的残留模拟器 `aq-hd_x-1` | 非默认账本不动；默认账本（`~/.local/state/aq`）对账时删掉 | 单元；集成 |
-| CASE-HOLD-12 | 台数上限 N（`sim_slots`）；已有 N 台 iOS 模拟器或 Android 实例（含还没删完的）时再借一台；一次就要超过 N 台；借浏览器会话 | 前者 waiting，`waiting_for: ["sim_slots"]`，带 `retry_after_s`，归还一台并删完后放行；一次要超过 N 台的 rejected unschedulable；浏览器会话不计台数 | 单元；集成；真 simctl 连借 4 + 1 台：实机 |
+| CASE-HOLD-12 | 台数上限 N（`sim_slots`）；已有 N 台 iOS 模拟器或 Android 实例（含还没删完的）时再借一台；一次就要超过 N 台；借浏览器会话 | 前者 waiting，`waiting_for: ["sim_slots"]`，带 `next`，归还一台并删完后放行；一次要超过 N 台的 rejected unschedulable；浏览器会话不计台数 | 单元；集成；真 simctl 连借 4 + 1 台：实机 |
 | CASE-HOLD-11 | 借出的模拟器在 held 期间被 aq 以外删掉 | `aq status <id>` 仍为 held，多出 `missing` 列出已不在的设备 id；aq.log 记一笔 | 集成 |
 
 ## 真机
