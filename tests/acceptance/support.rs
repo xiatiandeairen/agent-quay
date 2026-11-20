@@ -346,6 +346,87 @@ pub fn git_repo(dir: &Path) {
     g(&["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"]);
 }
 
+/// 通用环境里的项目结构（覆盖本机真实执行记录里的主要形态）。
+#[derive(Debug, Clone, Copy)]
+pub enum Layout {
+    /// 普通单仓，带子目录 `sub/`。
+    Single,
+    /// 同一仓库再开一个 worktree。
+    Worktrees,
+    /// 带子模块 `External/Sub`。
+    Submodule,
+    /// 一个仓库里三个包：`rust/`、`swift/`、`node/`。
+    Monorepo,
+    /// 不在任何 git 仓库里的目录。
+    NoGit,
+}
+
+/// 搭好的项目。`dirs` 按结构不同：Single → [sub]；Worktrees → [第二个 worktree]；Submodule → [子模块目录]；
+/// Monorepo → [rust, swift, node]；NoGit → [另一个非 git 目录]。
+pub struct Project {
+    pub root: PathBuf,
+    pub dirs: Vec<PathBuf>,
+}
+
+fn commit_all(dir: &Path, msg: &str) {
+    git(dir, &["add", "."]);
+    git(dir, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", msg]);
+}
+
+impl Env {
+    /// 在工作目录下搭一个指定结构的项目（目录名带结构名，同一个 Env 里可以搭多个）。
+    pub fn project(&self, layout: Layout) -> Project {
+        let root = self.work().join(format!("{layout:?}").to_lowercase());
+        let dirs = match layout {
+            Layout::Single => {
+                git_repo(&root);
+                std::fs::create_dir_all(root.join("sub")).expect("mkdir");
+                std::fs::write(root.join("sub/b.txt"), "b\n").expect("write");
+                commit_all(&root, "sub");
+                vec![root.join("sub")]
+            }
+            Layout::Worktrees => {
+                git_repo(&root);
+                let wt = self.work().join("worktrees-wt2");
+                git(&root, &["worktree", "add", "-q", "--detach", wt.to_str().expect("utf8")]);
+                vec![wt]
+            }
+            Layout::Submodule => {
+                let src = self.work().join("submodule-src");
+                git_repo(&src);
+                git_repo(&root);
+                let out = Command::new("git")
+                    .args(["-c", "protocol.file.allow=always", "submodule", "add", "-q", src.to_str().expect("utf8"), "External/Sub"])
+                    .current_dir(&root)
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .output()
+                    .expect("git submodule");
+                assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+                commit_all(&root, "sub");
+                vec![root.join("External/Sub")]
+            }
+            Layout::Monorepo => {
+                git_repo(&root);
+                let pkgs = [("rust", "Cargo.toml"), ("swift", "Package.swift"), ("node", "package.json")];
+                for (dir, manifest) in pkgs {
+                    std::fs::create_dir_all(root.join(dir)).expect("mkdir");
+                    std::fs::write(root.join(dir).join(manifest), "\n").expect("write");
+                }
+                commit_all(&root, "packages");
+                pkgs.iter().map(|(d, _)| root.join(d)).collect()
+            }
+            Layout::NoGit => {
+                let other = self.work().join("nogit-other");
+                for d in [&root, &other] {
+                    std::fs::create_dir_all(d).expect("mkdir");
+                }
+                vec![other]
+            }
+        };
+        Project { root, dirs }
+    }
+}
+
 pub fn git(dir: &Path, args: &[&str]) -> String {
     let o = Command::new("git").args(args).current_dir(dir).env("GIT_CONFIG_GLOBAL", "/dev/null").output().expect("git");
     String::from_utf8_lossy(&o.stdout).into_owned()

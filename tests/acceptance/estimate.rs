@@ -288,3 +288,38 @@ fn only_unreliable_samples_take_min() {
     assert_eq!(disk_of(&e, &p.id()), 3_000, "全是不可靠实测时取最小值");
     e.aq(&["cancel", &bg.id()]);
 }
+
+/// 两个目录跑同一条命令（命令原文相同 → 签名相同），各自读本目录的 mem.txt 决定占多少内存；
+/// a 跑两次 1G、b 跑两次 50M 之后，在两处各提交一次并让它们排队，返回两处的记账内存。
+fn mem_after_history(e: &Env, a: &std::path::Path, b: &std::path::Path) -> (i64, i64) {
+    let cmd = ["sh", "-c", "fake-task --mem \"$(cat mem.txt)\""];
+    let run = |dir: &std::path::Path, wait: &str| {
+        let mut v = vec!["run", "--fresh", "--wait", wait, "--"];
+        v.extend_from_slice(&cmd);
+        e.aq_in(dir, &v)
+    };
+    std::fs::write(a.join("mem.txt"), "1G").unwrap();
+    std::fs::write(b.join("mem.txt"), "50M").unwrap();
+    for dir in [a, a, b, b] {
+        assert_eq!(run(dir, "60").status(), "ok");
+    }
+    e.set_sys(10, 500_000);
+    let (pa, pb) = (run(a, "0"), run(b, "0"));
+    for p in [&pa, &pb] {
+        assert!(until(10, || e.q_i64(&format!("SELECT mem_mb IS NOT NULL FROM executions WHERE id='{}'", p.id())) == 1));
+    }
+    let out = (mem_of(e, &pa.id()), mem_of(e, &pb.id()));
+    e.aq(&["cancel", &pa.id()]);
+    e.aq(&["cancel", &pb.id()]);
+    out
+}
+
+// CASE-EST-19
+#[test]
+fn nogit_dirs_estimated_separately() {
+    let e = Env::new();
+    let p = e.project(Layout::NoGit);
+    let (a, b) = mem_after_history(&e, &p.root, &p.dirs[0]);
+    assert!(a >= 1000, "第一个目录按自己的 1G 实测记账：{a}MB");
+    assert!(b < 600, "CASE-EST-19 第二个目录按自己的 50M 实测记账：{b}MB（第一个 {a}MB）");
+}
