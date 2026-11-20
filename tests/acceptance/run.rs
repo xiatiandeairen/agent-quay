@@ -45,8 +45,10 @@ fn wait0_returns_fast_with_retry_hint() {
     assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
     assert_eq!(r.code, 2);
     assert!(["queued", "running"].contains(&r.status()));
-    let ra = r.one()["retry_after_s"].as_i64().unwrap();
-    assert!((10..=300).contains(&ra));
+    let next = r.one()["next"].as_str().unwrap().to_string();
+    assert!(next.starts_with(&format!("aq status {} --wait ", r.id())), "{next}");
+    let secs: i64 = next.rsplit(' ').next().unwrap().parse().unwrap();
+    assert!((10..=100).contains(&secs), "等待秒数不超过 Bash 默认超时：{next}");
     e.aq(&["cancel", &r.id()]);
 }
 

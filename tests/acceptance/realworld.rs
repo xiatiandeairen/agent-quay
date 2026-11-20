@@ -24,7 +24,7 @@ fn two_release_worktrees_build_together_cargo_third() {
     assert_ne!(a.id(), b.id(), "CASE-REUSE-3 不同的绝对 derivedDataPath 不复用");
     let c = e.aq_in(&repo, &["run", "--wait", "1", "--", "fake-task", "--secs", "1", "--exit", "0"]);
     assert_eq!(c.status(), "queued", "cargo test 排第三");
-    assert!((10..=300).contains(&c.one()["retry_after_s"].as_i64().unwrap()));
+    assert!(c.one()["next"].as_str().is_some_and(|n| n.starts_with(&format!("aq status {} --wait ", c.id()))));
     assert_eq!(e.q_i64("SELECT count(*) FROM executions WHERE status='running'"), 2, "两个 App 编译同时运行");
     assert_eq!(e.aq(&["status", &a.id(), &b.id(), &c.id(), "--wait", "30"]).code, 0);
 }

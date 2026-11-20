@@ -74,16 +74,16 @@ fn human_same_exit_code() {
 fn fields_appear_only_when_applicable() {
     let e = Env::new();
     let ok = e.aq(&["run", "--", "true"]);
-    assert!(ok.one().get("exit_code").is_none() && ok.one().get("retry_after_s").is_none() && ok.one().get("content_changed").is_none());
+    assert!(ok.one().get("exit_code").is_none() && ok.one().get("next").is_none() && ok.one().get("content_changed").is_none());
     let q = e.aq(&["run", "--wait", "0", "--", "fake-task", "--secs", "5"]);
-    assert!(q.one().get("retry_after_s").is_some() && q.one().get("exit_code").is_none());
+    assert!(q.one().get("next").is_some() && q.one().get("exit_code").is_none());
     let c = e.aq(&["cancel", &q.id()]);
     assert_eq!(c.code, 0, "cancel 接受即 0");
     let h = e.aq(&["hold", "ios-device"]);
     assert!(h.one().get("accounts").is_none(), "没借账号不出现 accounts");
-    assert!(h.one().get("retry_after_s").is_none());
+    assert!(h.one().get("next").is_none());
     let w = e.aq(&["hold", "ios-device", "--wait", "0"]);
-    assert!(w.one().get("devices").is_none() && w.one().get("retry_after_s").is_some());
+    assert!(w.one().get("devices").is_none() && w.one().get("next").is_some());
     assert_eq!(e.aq(&["release", &w.id()]).code, 0);
     assert_eq!(e.aq(&["release", &h.id()]).code, 0);
     assert_eq!(e.aq(&["status", &h.id()]).code, 0, "released → 0");

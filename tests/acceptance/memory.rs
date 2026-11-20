@@ -32,7 +32,7 @@ fn pressure_or_swapping_blocks_with_reason_until_it_clears() {
         assert_eq!(h.status(), "waiting", "{extra}: {}", h.stdout);
         assert_eq!(waiting_for(&e, &r.id()), ["mem_pressure"], "{extra}");
         assert_eq!(waiting_for(&e, &h.id()), ["mem_pressure"], "{extra}");
-        assert!(e.aq(&["status", &h.id()]).one()["retry_after_s"].is_number());
+        assert!(e.aq(&["status", &h.id()]).one()["next"].as_str().is_some_and(|n| n.starts_with("aq status ")));
         let d = e.aq(&["hold", "ios-device", "--wait", "1"]);
         assert_eq!(d.status(), "held", "{extra}: 不要内存的（真机）不受影响：{}", d.stdout);
         e.set_sys_with(json!({"pressure": "normal", "swapping": false}));
@@ -52,7 +52,7 @@ fn three_simulators_cold_start_one_at_a_time() {
     let waiting: Vec<&String> = ids.iter().filter(|id| e.aq(&["status", id]).status() == "waiting").collect();
     assert_eq!(waiting.len(), 3, "第一台在建（waiting），另两台排队");
     assert_eq!(waiting_for(&e, &ids[1]), ["cold_start"]);
-    assert!(e.aq(&["status", &ids[2]]).one()["retry_after_s"].is_number());
+    assert!(e.aq(&["status", &ids[2]]).one()["next"].as_str().is_some_and(|n| n.starts_with("aq status ")));
     let mut most = 0;
     assert!(
         until(30, || {
@@ -77,7 +77,7 @@ fn simulator_count_limit_queues_then_admits_after_release() {
     let c = e.aq(&["hold", "ios-sim", "--wait", "2"]);
     assert_eq!(c.status(), "waiting", "{}", c.stdout);
     assert_eq!(waiting_for(&e, &c.id()), ["sim_slots"]);
-    assert!(e.aq(&["status", &c.id()]).one()["retry_after_s"].is_number());
+    assert!(e.aq(&["status", &c.id()]).one()["next"].as_str().is_some_and(|n| n.starts_with("aq status ")));
     e.aq(&["release", &a.id()]);
     assert!(until(20, || e.aq(&["status", &c.id()]).status() == "held"), "归还一台、删完后放行");
 }
