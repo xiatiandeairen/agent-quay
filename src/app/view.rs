@@ -7,13 +7,13 @@ use serde_json::{json, Map, Value};
 
 use super::ctx::Ctx;
 
-/// `reused` 只有 `aq run` 的返回才有意义（这次提交是否接上了已有的同一执行）；status、cancel 传 None，不输出这个字段。
+/// `reused` 只有 `aq run` 的返回才有意义（这次提交接上了已有的同一执行），且只在为 true 时输出；status、cancel 传 None。
 pub fn exec_json(ctx: &Ctx, e: &ExecRow, reused: Option<bool>, soonest_free_s: Option<i64>) -> Value {
     let mut m = Map::new();
     m.insert("id".into(), json!(e.id));
     m.insert("status".into(), json!(e.status.as_str()));
-    if let Some(r) = reused {
-        m.insert("reused".into(), json!(r));
+    if reused == Some(true) {
+        m.insert("reused".into(), json!(true));
     }
     let est = e.timeout_s.map(|t| t / 3);
     match e.status {

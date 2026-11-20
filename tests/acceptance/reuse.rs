@@ -251,3 +251,17 @@ fn odd_cwd_and_argv_run_verbatim_and_hash_stable() {
     assert_eq!(std::fs::read_to_string(r.one()["log"].as_str().unwrap()).unwrap(), arg);
     assert!(merged(&e, (&dir, &["fake-task", "--secs", "20", "--touch", arg]), (&dir, &["fake-task", "--secs", "20", "--touch", arg])));
 }
+
+// CASE-REUSE-1
+#[test]
+fn reuse_is_logged_on_the_shared_execution() {
+    let e = Env::new();
+    let repo = e.work().join("repo");
+    git_repo(&repo);
+    let a = e.aq_in(&repo, &["run", "--wait", "0", "--", "fake-task", "--secs", "3"]);
+    let b = e.aq_in(&repo, &["run", "--wait", "0", "--", "fake-task", "--secs", "3"]);
+    assert_eq!(b.id(), a.id());
+    let log = e.aq_log();
+    assert_eq!(log.lines().filter(|l| l.contains(&a.id()) && l.contains("reused by a new submission")).count(), 1, "{log}");
+    e.aq(&["status", &a.id(), "--wait", "20"]);
+}

@@ -30,10 +30,10 @@
 
 | 编号 | 场景 | 预期效果 | 验证 |
 |---|---|---|---|
-| CASE-REUSE-1 | 同一份代码、同一执行目录、同一条命令已有一次在排队或运行，在同一 worktree 或内容相同的其他 worktree 再提交（含 20 次并发提交） | 只执行一次；后来者 reused=true，拿到同一个 id、结果和日志路径 | 集成 |
+| CASE-REUSE-1 | 同一份代码、同一执行目录、同一条命令已有一次在排队或运行，在同一 worktree 或内容相同的其他 worktree 再提交（含 20 次并发提交） | 只执行一次；后来者 reused=true，拿到同一个 id、结果和日志路径；每次共用在 `aq.log` 里记一行 `reused by a new submission` | 集成 |
 | CASE-REUSE-2 | 内容指纹：有未提交改动、有未被忽略的新文件、子模块里有改动；两边改动逐字节相同、改了又改回、只改被忽略的文件；内容相同但 SHA 不同（如 rebase 后） | 前三种与干净时 hash 不同；中间三种 hash 相同；最后一种 hash 不同 | 集成 |
 | CASE-REUSE-3 | 同一份代码上：执行目录不同、命令原文不同（含参数顺序不同、带会话临时路径）；只有环境变量不同 | 前者不合并；后者合并 | 集成 |
-| CASE-REUSE-4 | 同 hash 的上一次已经结束；带 `--fresh`；不在 git 仓库里 | 都新开一次执行，reused=false；后两种 hash 为空、不参与合并 | 集成 |
+| CASE-REUSE-4 | 同 hash 的上一次已经结束；带 `--fresh`；不在 git 仓库里 | 都新开一次执行，返回不带 reused；后两种 hash 为空、不参与合并 | 集成 |
 | CASE-REUSE-5 | 任务运行中仓库文件被修改 | 结果带 content_changed=true | 集成 |
 | CASE-REUSE-6 | 计算指纹：仓库里有别人持有的 index.lock、浅克隆、子模块未初始化；同时有脚本连续提交 100 次 | 指纹照常算出；`.git` 下不新增或删除文件，`.git/index` 修改时间不变；提交方零次 index.lock 报错 | 集成 |
 
@@ -77,7 +77,7 @@
 | CASE-QUEUE-10 | 排头只缺等不到的磁盘；第二个任务缺内存；第三个任务放得下但要内存 | 第二个接手当排头、内存预留给它；第三个带 `blocked_by: <第二个>` | 单元 |
 | CASE-QUEUE-11 | 剩余空间已低于底线；有要 100MB 磁盘的任务、估值为 0 的任务 | 前者 `disk_full`；后者照常开始 | 单元 |
 | CASE-QUEUE-12 | `disk_full` 期间腾出了足够空间 | 下一轮检查内开始，不需要重新提交 | 集成 |
-| CASE-QUEUE-13 | 任务被排头预留挡住一段时间后放行 | `aq.log` 里有一行 `admitted after <秒>s blocked by <排头> on [<资源>]` | 集成 |
+| CASE-QUEUE-13 | 任务排队一段时间后放行：被排头预留挡住；自己缺资源 | `aq.log` 里有一行 `admitted after <秒>s blocked by <排头> on [<资源>]`；自己缺资源而排队的（排头本身）放行时同样有一行 `admitted after <秒>s waiting for [<资源>]` | 集成 |
 
 ## 借用
 
@@ -160,7 +160,7 @@
 |---|---|---|---|
 | CASE-STATUS-1 | `aq status` 不带 id | 第一行是全机概况，恰好 7 个字段，数值与系统差 5 个百分点内（CPU 是实际使用率，不是平均负载）；之后列出全机所有活动的执行和未归还的借用 | 单元；集成 |
 | CASE-STATUS-2 | `aq status <id1> <id2> --wait 30`；以及多个 id 分属不同退出码的组合（如 running + failed、cancelled + rejected unschedulable、ok + rejected usage） | 等到都结束或超时；每个对象一行；退出码按优先级 5 > 3 > 1 > 4 > 2 > 0 取一个，不取数值最大（running + failed → 1，cancelled + unschedulable → 5，ok + usage → 3） | 集成 |
-| CASE-STATUS-3 | 所有命令的输出 | 每个对象一行 JSON，字段只在适用时出现（`reused` 只在 `aq run` 的返回里有，status、cancel 不带）；退出码：ok/held/released、`--help`/`--version`、不带 id 的 status 为 0；failed/timeout 为 1；queued/running/waiting（含 disk_full）为 2；rejected usage 为 3；interrupted/cancelled/reclaimed、rejected device_error、busy 为 4；rejected unschedulable/device_unavailable（含带 undeclared 的）、状态目录不可写为 5；cancel 返回时已停完为 0、未停完为 2，release 被接受为 0；cancel 只在等不到终态、返回 running 时带 `cancel_requested: true` | 集成 |
+| CASE-STATUS-3 | 所有命令的输出 | 每个对象一行 JSON，字段只在适用时出现（`reused` 只在 `aq run` 共用了已有执行时出现、值为 true，status、cancel 不带）；退出码：ok/held/released、`--help`/`--version`、不带 id 的 status 为 0；failed/timeout 为 1；queued/running/waiting（含 disk_full）为 2；rejected usage 为 3；interrupted/cancelled/reclaimed、rejected device_error、busy 为 4；rejected unschedulable/device_unavailable（含带 undeclared 的）、状态目录不可写为 5；cancel 返回时已停完为 0、未停完为 2，release 被接受为 0；cancel 只在等不到终态、返回 running 时带 `cancel_requested: true` | 集成 |
 | CASE-STATUS-4 | 任意命令加 `--human`；在等 `disk_full`、被排头挡住的任务加 `--human` | 输出易读文本，含在等什么、评估来源、借用者、状态目录；退出码与不加相同。`disk_full` 显示还差多少、需要人清理；被挡的显示挡住它的排头 id | 集成 |
 | CASE-STATUS-5 | 配置文件有未知字段或写错一行 | 任意 aq 命令返回 rejected usage，消息带行号 | 单元；集成 |
 | CASE-STATUS-6 | `aq status --top` | 英文仪表盘：CPU、内存、磁盘的占用条和重任务名额条，每个活动的执行、借用各一行（状态、时长、命令或设备、在等什么）；在终端里每 0.5 秒原地重画，Ctrl-C 退出；输出不是终端时只画一帧，退出码 0；与 id、`--wait`、`--human` 同用返回 rejected usage | 单元；集成 |

@@ -237,3 +237,17 @@ fn blocked_task_reports_head_and_logs_how_long() {
         "{log}"
     );
 }
+
+// CASE-QUEUE-13
+#[test]
+fn self_waiting_task_logs_what_it_waited_for() {
+    let e = Env::with_config(&DEFAULT_CONFIG.replace("mem = \"28G\"", "mem = \"6G\""));
+    ai_disk(&e, 4.0, 0.0);
+    let a = e.aq(&["run", "--fresh", "--wait", "0", "--", "fake-task", "--secs", "3"]);
+    assert!(until(10, || running(&e) == 1));
+    let b = e.aq(&["run", "--fresh", "--wait", "0", "--", "sh", "-c", "fake-task --secs 0"]);
+    assert!(estimated(&e, &b.id()));
+    e.aq(&["status", &a.id(), &b.id(), "--wait", "30"]);
+    let log = e.aq_log();
+    assert!(log.lines().any(|l| l.contains(&b.id()) && l.contains("admitted after") && l.contains("waiting for [mem]")), "{log}");
+}

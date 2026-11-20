@@ -22,9 +22,9 @@ aq 是单机上多个 AI agent 共用的排队与借还工具：agent 把编译�
 
 ```bash
 aq run -- xcodebuild -scheme App -destination 'generic/platform=iOS Simulator' build
-# → {"id":"ex_7f3a","status":"queued","reused":false,"retry_after_s":120}
+# → {"id":"ex_7f3a","status":"queued","retry_after_s":120}
 aq status ex_7f3a --wait 100
-# → {"id":"ex_7f3a","status":"ok","reused":false,"log":"~/.local/state/aq/logs/ex_7f3a.log"}
+# → {"id":"ex_7f3a","status":"ok","log":"~/.local/state/aq/logs/ex_7f3a.log"}
 ```
 
 ### 1.1 解决的问题
@@ -452,7 +452,7 @@ aq release <借用id>
 | --- | --- | --- |
 | `id` | 总是 | 传给 status、cancel |
 | `status` | 总是 | 决定下一步 |
-| `reused` | 只在 `aq run` 的返回里 | 这次提交是否接上了别人的同一次执行；status、cancel 不输出（它们没有「这次提交」可言） |
+| `reused` | 只在 `aq run` 共用了已有执行时，值为 true | 这次提交接上了别人的同一次执行；没共用时不输出（会话记录里 1098 次 false 从未被使用）；status、cancel 不输出（它们没有「这次提交」可言） |
 | `mem_pressure_s` `message` | 在等内存压力回落 | 压力已持续的秒数；超过 10 分钟另加 `message` 说明，仍在排队（CASE-QUEUE-5） |
 | `waiting_for` | queued、waiting 且查得到原因 | 在等哪类资源：`heavy`、`mem`、`mem_pressure`、`cold_start`、`sim_slots`、`disk`、`disk_full`、`net`、`device:<类型>`、`account:<名字>`（CASE-QUEUE-5、CASE-QUEUE-6、CASE-QUEUE-8） |
 | `blocked_by` | queued、waiting 且自己放得下、只因排头预留没放行 | 挡住它的排头 id（CASE-QUEUE-3） |
@@ -713,7 +713,7 @@ stateDiagram-v2
 | 返回 busy | `lsof aq.db` 找长时间持有写锁的进程 |
 | 没有复用 | 比较两次的 `fingerprint`、`cwd`、`argv`；`--fresh` 和不在 git 里 hash 为空 |
 
-`aq.log` 每次状态转移一行：`ts`、`id`、`from`、`to`、`reason`、`by`（触发命令），以及 `note`（评估来源、重拉 runner、删除设备、改记重任务等）。
+`aq.log` 每次状态转移一行：`ts`、`id`、`from`、`to`、`reason`、`by`（触发命令），以及 `note`（评估来源、重拉 runner、删除设备、改记重任务、排过队的放行时等了多久和在等什么、被共用等）。按原因统计排队耗时：`grep "admitted after" aq.log`；统计共用次数：`grep "reused by" aq.log`。
 
 ## 9 测试与验收
 

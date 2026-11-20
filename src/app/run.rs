@@ -82,7 +82,10 @@ fn submit(ctx: &Ctx, store: &mut Store, a: &RunArgs, l: &Located) -> AppResult<(
         let lock = lock.ok_or_else(|| AppError::Fatal(format!("lock of the new execution is taken: {id}")))?;
         Ok((id, Some(lock)))
     })?;
-    let Some(lock) = lock else { return Ok((id, true)) };
+    let Some(lock) = lock else {
+        ctx.log_note(&id, "reused by a new submission"); // 统计共用省下多少次执行（CASE-REUSE-1）
+        return Ok((id, true));
+    };
     ctx.log_transition(&id, "", "queued", "submitted");
     let fd = inheritable(&lock).map_err(AppError::Fatal)?;
     spawn::runner(ctx, &id, fd)?;

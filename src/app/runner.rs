@@ -23,8 +23,11 @@ fn crash_point(name: &str) {
 enum Step {
     Started(Box<Gate>),
     Stop,
-    /// 没放行；只因排头预留时带上排头和它占着的资源。
-    Wait(Option<(String, Vec<String>)>),
+    /// 没放行：在等的资源类，只因排头预留没放行时另带排头 id。
+    Wait {
+        kinds: Vec<String>,
+        head: Option<String>,
+    },
 }
 
 /// 提交前先在事务里读（等提交方提交），读不到或已结束就退出。
@@ -64,11 +67,8 @@ fn try_start(ctx: &Ctx, c: &aq_store::Conn, e: &ExecRow) -> AppResult<Step> {
     }
     let adm = &ck.plan.admit;
     if !adm.admitted.iter().any(|a| a.id == e.id) {
-        let head = adm.blocked_by.get(&e.id).map(|h| {
-            let kinds = adm.waiting_for.get(&e.id).map(|k| k.iter().map(|x| x.code()).collect()).unwrap_or_default();
-            (h.clone(), kinds)
-        });
-        return Ok(Step::Wait(head));
+        let kinds = adm.waiting_for.get(&e.id).map(|k| k.iter().map(|x| x.code()).collect()).unwrap_or_default();
+        return Ok(Step::Wait { kinds, head: adm.blocked_by.get(&e.id).cloned() });
     }
     let log = ctx.dirs.log_file(&e.id);
     let env = [("AQ_EXECUTION_ID", e.id.clone())];
@@ -110,27 +110,34 @@ fn try_start(ctx: &Ctx, c: &aq_store::Conn, e: &ExecRow) -> AppResult<Step> {
 /// 排队直到放行；返回闸门和命令启动前一刻的剩余磁盘（排队期间别人写的不算这次的，CASE-EST-15）。
 fn queue(ctx: &Ctx, store: &mut Store, e: &ExecRow) -> AppResult<Option<(Gate, i64)>> {
     let mut round = 0;
-    // 被排头预留挡过：第一次挡住的时刻、最后一次是谁挡的、挡在哪类资源上。放行时写进 aq.log，用来判断要不要给更多资源做回填（CASE-QUEUE-13）
-    let mut blocked: Option<(i64, String, Vec<String>)> = None;
+    // 排过队：第一次没放行的时刻、等过的资源类、最后一次挡住它的排头。放行时写进 aq.log，事后按原因统计排队耗时（CASE-QUEUE-13）
+    let mut waited: Option<(i64, Vec<String>, Option<String>)> = None;
     loop {
         match store.tx(|c| try_start(ctx, c, e))? {
             Step::Started(mut g) => {
                 crash_point("after_commit");
                 let disk_before = ctx.sys.sample().disk_free_mb;
                 g.open().map_err(AppError::Fatal)?;
-                if let Some((since, head, kinds)) = &blocked {
+                if let Some((since, kinds, head)) = &waited {
                     let s = (ctx.now() - since) / 1000;
-                    ctx.log_note(&e.id, &format!("admitted after {s}s blocked by {head} on [{}]", kinds.join(", ")));
+                    let why = match head {
+                        Some(h) => format!("blocked by {h} on"),
+                        None => "waiting for".into(),
+                    };
+                    ctx.log_note(&e.id, &format!("admitted after {s}s {why} [{}]", kinds.join(", ")));
                 }
                 ctx.log_transition(&e.id, "queued", "running", "admitted");
                 return Ok(Some((*g, disk_before)));
             }
             Step::Stop => return Ok(None),
-            Step::Wait(head) => {
-                if let Some((h, k)) = head {
-                    let since = blocked.as_ref().map_or(ctx.now(), |b| b.0);
-                    blocked = Some((since, h, k));
+            Step::Wait { kinds, head } => {
+                let w = waited.get_or_insert_with(|| (ctx.now(), vec![], None));
+                for k in kinds {
+                    if !w.1.contains(&k) {
+                        w.1.push(k);
+                    }
                 }
+                w.2 = head.or(w.2.take());
                 ctx.pace(round, None);
                 round += 1;
             }
