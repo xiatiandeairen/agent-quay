@@ -195,3 +195,32 @@ fn log_total_over_cap_deletes_oldest_finished() {
     assert!(!exists[0] && exists[3], "最旧的已结束日志被删：{exists:?}");
     assert_eq!(e.q_i64("SELECT count(*) FROM executions"), 4, "执行记录保留");
 }
+
+// CASE-STORE-7
+#[test]
+fn finished_run_sweeps_stale_locks() {
+    let e = Env::new();
+    let first = e.aq(&["run", "--fresh", "--", "fake-task"]).id();
+    let locks = e.state().join("locks");
+    std::fs::create_dir_all(&locks).unwrap();
+    let make = |name: &str, hours_ago: u64| {
+        let f = std::fs::File::create(locks.join(name)).unwrap();
+        f.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(hours_ago * 3600)).unwrap();
+    };
+    let gone = [format!("{first}.lock"), "ex_ghost.lock".into(), "hd_ghost.lock".into(), "ai-old.lock".into(), "ai-old.failed".into()];
+    let kept = ["ex_busy.lock", "ai-new.lock", "ai-new.failed", "simgc.lock"];
+    for n in &gone {
+        make(n, 2);
+    }
+    for n in kept {
+        make(n, if n.starts_with("ai-") { 0 } else { 2 });
+    }
+    let busy = std::fs::OpenOptions::new().write(true).open(locks.join("ex_busy.lock")).unwrap();
+    busy.try_lock().unwrap();
+    e.aq(&["run", "--fresh", "--", "fake-task"]).id();
+    assert!(until(10, || gone.iter().all(|n| !locks.join(n).exists())), "过期的锁被删");
+    for n in kept {
+        assert!(locks.join(n).exists(), "{n} 保留");
+    }
+    drop(busy);
+}

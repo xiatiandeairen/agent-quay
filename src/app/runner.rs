@@ -160,6 +160,7 @@ fn finish(ctx: &Ctx, store: &mut Store, e: &ExecRow, o: &Outcome) -> AppResult<(
         let _ = std::fs::remove_file(ctx.dirs.log_file(&id)); // 日志可能已被总量清理删掉
     }
     super::logs::enforce_total(ctx, store)?;
+    super::sweep::locks(ctx, store)?;
     Ok(())
 }
 
