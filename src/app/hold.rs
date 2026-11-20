@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use aq_core::admit::{unschedulable, Demand};
 use aq_core::devices::{judge, real_types, Verdict};
-use aq_core::model::{DeviceType, HoldRequest, HoldStatus, ProcId};
+use aq_core::model::{DeviceType, HoldRequest, HoldStatus, ProcId, Reason};
 use aq_core::ports::RealDevices;
 use aq_store::{HoldRow, NewHold, Store};
 use aq_sys::lock::inheritable;
@@ -71,11 +71,12 @@ pub fn hold(ctx: &Ctx, store: &mut Store, a: &HoldArgs) -> AppResult<(Value, i32
     let mut req = parse(a)?;
     let v = check_real(&req, ctx);
     if let Some((reason, msg)) = &v.reject {
-        return Ok((view::rejected_devices(reason, msg, &v), 3));
+        return Ok((view::rejected_devices(reason.as_str(), msg, &v), reason.exit_code()));
     }
     req.exclude = v.exclude;
     if let Some(why) = unschedulable(&Demand::Hold(req.clone()), &ctx.config.cap) {
-        return Ok((view::rejected("unschedulable", &why), 3));
+        let r = Reason::Unschedulable;
+        return Ok((view::rejected(r.as_str(), &why), r.exit_code()));
     }
     let who = owner(ctx);
     let id = super::run::new_id("hd");

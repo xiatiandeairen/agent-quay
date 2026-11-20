@@ -57,7 +57,7 @@ fn boot_failure_rolls_back_group() {
     let e = Env::new();
     std::fs::write(e.path("emu/fail_boot"), "").unwrap();
     let r = e.aq(&["hold", "android-emu", "android-device", "--account", "a"]);
-    assert_eq!((r.code, r.one()["reason"].as_str()), (3, Some("device_error")), "{}", r.stdout);
+    assert_eq!((r.code, r.one()["reason"].as_str()), (4, Some("device_error")), "{}", r.stdout);
     assert_eq!(e.q_i64("SELECT count(*) FROM hold_devices") + e.q_i64("SELECT count(*) FROM hold_accounts"), 0);
     std::fs::remove_file(e.path("emu/fail_boot")).unwrap();
     assert_eq!(e.aq(&["hold", "android-device", "--account", "a"]).status(), "held", "真机和账号立刻可借");

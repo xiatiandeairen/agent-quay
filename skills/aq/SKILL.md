@@ -9,12 +9,12 @@ description: aq 排队：在本机跑编译或测试（xcodebuild、swift build/
 
 ## 常用命令写成脚本
 
-命令原文固定，别的 agent 跑同一件事时才能共用结果，资源估算也越跑越准。
+命令原文固定，别的 agent 跑同一件事时才能共用结果。
 
 - 命令本身短而固定（如 `cargo test`）就直接用。
 - 先用项目已有入口：`just`、`make`、`npm run` 等 → `aq run -- just test`。
 - 没有就在仓库 `scripts/` 下建脚本，一个用途一个（如 `scripts/build.sh`、`scripts/test.sh`），设备 id 等变化的值从脚本参数传入。新建脚本提交前先问用户。
-- 脚本放在仓库里被 git 跟踪或未忽略的位置：放在忽略目录或仓库外，改了脚本 aq 察觉不到，可能把你并进别人正在跑的旧版本。
+- 脚本放在仓库里被 git 跟踪或未忽略的位置；放在忽略目录或仓库外，改了脚本后可能拿到别人用旧脚本跑出的结果。
 - 管道、`&&`、环境变量写进脚本里；`aq run` 不经过 shell。
 
 ## 跑编译或测试
@@ -23,9 +23,9 @@ description: aq 排队：在本机跑编译或测试（xcodebuild、swift build/
    - `run`、`hold` 默认最多等 100 秒（`--wait`；`status` 不加就不等），配合 Bash 默认 120 秒超时；你给 Bash 设了更长超时时，把 `--wait` 设成比它少 20 秒。
 2. 看 `status`：
    - `queued` / `running`：`aq status <id> --wait <retry_after_s 或更长>` 接着等；也可以放后台跑。
-   - `ok`：继续。出现 `content_changed: true`（只在为真时出现）表示运行期间仓库文件变了；命令自己生成的未忽略文件（如第一次生成的 `Cargo.lock`）也算，只有你的代码改了才需要重跑。
+   - `ok`：继续。带 `content_changed: true` 时，结果可能不对应最新代码：只有你的代码在运行期间改过才需要重跑。
    - `failed`：读 `log` 里的输出修代码。`timeout`：看日志判断是卡住还是太慢。`interrupted`：环境问题，直接重试。
-   - `rejected`：按 `reason` 改调用（见「出错时」）。
+   - `rejected`：按 `reason` 处理（见「出错时」），或按退出码处理（见「退出码」）。
 3. 同时跑几个：每个用 `--wait 0` 提交，再 `aq status <id1> <id2> --wait <秒>` 一起等。
 
 这一步结束的标准：每个 id 都拿到终态（ok / failed / timeout / interrupted / cancelled / rejected）。还在 queued、running 时不下结论。
@@ -46,21 +46,32 @@ description: aq 排队：在本机跑编译或测试（xcodebuild、swift build/
 ## 找回和查看
 
 - 上下文丢了：`aq status` 列出全机活动的执行和未归还的借用，第一行是忙闲概况。
-- 要排查（在等什么资源、估算从哪来）：加 `--human`。
+- 要看在等什么、被谁挡住：加 `--human`。
 
 ## 出错时
 
 | 情况 | 怎么办 |
 | --- | --- |
-| `waiting_for` 含 `disk_full` | 磁盘不够，等运行中的任务结束也腾不出来。把 `message` 转告用户（还差多少 GB、需要清理磁盘）；不想等就 `aq cancel <id>`。不要绕过 aq 直接跑 |
+| `waiting_for` 含 `disk_full` | 磁盘清理之前不会开始。把 `message` 转告用户（还差多少 GB、需要清理磁盘）；不想等就 `aq cancel <id>`。不要绕过 aq 直接跑 |
 | 带 `blocked_by` | 你要的资源被排在前面的 `<id>` 占着，它开始后就轮到你，接着等即可 |
 | `rejected` + `usage` | 写法不对（缺 `--`、设备类型拼错、id 不存在），改调用 |
 | `rejected` + `unschedulable` | 需求超过整机容量，或真机比登记的多，永远等不到；告诉用户 |
 | `rejected` + `device_unavailable` | 登记过的真机此刻连不上：把 `unavailable[].name` 和 `why` 告诉用户，请用户连上后再借 |
 | 拒绝结果带 `undeclared`、`config_snippet` | 有已连接但没登记的真机：把它们的名字和 `config_snippet` 给用户，由用户决定登记哪台、删掉不想借出的再粘进 config.toml |
-| `rejected` + `device_error` | 模拟器或浏览器创建失败，整组已回滚，可以重新 hold |
-| `reason: busy`（退出码 1） | 数据库忙，稍后重试同一条命令 |
+| `rejected` + `device_error` | 模拟器或浏览器创建失败，这次什么都没借到，可以重新 hold |
+| `reason: busy` | aq 暂时忙，什么都没改，稍后重试同一条命令 |
 | 只有 `message`、没有 `reason` | 环境问题（目录不可写、沙箱拦截），把 message 里的路径告诉用户 |
 | 找不到 aq，或 `aq --help` 里没有 run/hold | 告诉用户在 aq 仓库里跑 `just install` |
 
-退出码：0 成功或已借到，1 失败，2 还在排队或运行，3 被拒绝。
+## 退出码
+
+| 码 | 下一步 |
+| --- | --- |
+| 0 | 完成，继续 |
+| 1 | 命令失败：读 `log` 修代码 |
+| 2 | 还没完：`aq status <id> --wait` 接着等 |
+| 3 | 写法错：改调用 |
+| 4 | 原样重试：重新提交或重新借 |
+| 5 | 需要人：把 `message` 转告用户 |
+
+多个 id 一起查时，退出码取最需要处理的那个；每个 id 的情况看各自那行的 `status`。

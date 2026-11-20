@@ -117,7 +117,7 @@ fn over_capacity_rejected_unschedulable() {
     e.aq(&["run", "--", "fake-task", "--mem", "100M"]);
     e.write_config(&format!("ai_cli = \"x\"\n{}", DEFAULT_CONFIG.replace("mem = \"28G\"", "mem = \"64M\"")));
     let r = e.aq(&["run", "--", "fake-task", "--mem", "100M"]);
-    assert_eq!((r.code, r.status(), r.one()["reason"].as_str()), (3, "rejected", Some("unschedulable")), "{}", r.stdout);
+    assert_eq!((r.code, r.status(), r.one()["reason"].as_str()), (5, "rejected", Some("unschedulable")), "{}", r.stdout);
     assert_eq!(e.q_i64(&format!("SELECT started_at IS NULL FROM executions WHERE id='{}'", r.id())), 1, "CASE-EST-9 从未进入 running");
 }
 

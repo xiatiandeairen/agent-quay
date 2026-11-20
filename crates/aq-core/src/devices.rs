@@ -4,7 +4,7 @@
 use serde_json::Value;
 
 use crate::capacity::Capacity;
-use crate::model::{DeviceType, HoldRequest};
+use crate::model::{DeviceType, HoldRequest, Reason};
 
 /// 探测看到的一台真机；`problem` 为 None 表示此刻可用，否则是给人看的原因。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,7 +74,7 @@ pub struct Unavailable {
 /// 判定结果。`reject` 为 Some((reason, message)) 时立即拒绝，这时才带 `undeclared` 和 `snippet`。
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Verdict {
-    pub reject: Option<(&'static str, String)>,
+    pub reject: Option<(Reason, String)>,
     pub unavailable: Vec<Unavailable>,
     pub undeclared: Vec<Seen>,
     pub snippet: Option<String>,
@@ -118,10 +118,11 @@ pub fn judge(req: &HoldRequest, cap: &Capacity, scans: &[(DeviceType, Result<Vec
         let usable = declared.len() - down.len();
         if v.reject.is_none() {
             if want > declared.len() {
-                v.reject = Some(("unschedulable", format!("needs {want} {t}, only {} declared", declared.len())));
+                v.reject = Some((Reason::Unschedulable, format!("needs {want} {t}, only {} declared", declared.len())));
             } else if want > usable {
                 let list: Vec<String> = down.iter().map(|d| format!("{}: {}", d.name, d.why)).collect();
-                v.reject = Some(("device_unavailable", format!("needs {want} {t}, {usable} available right now. {}", list.join("; "))));
+                v.reject =
+                    Some((Reason::DeviceUnavailable, format!("needs {want} {t}, {usable} available right now. {}", list.join("; "))));
             }
         }
         v.exclude.extend(down.iter().map(|d| d.id.clone()));

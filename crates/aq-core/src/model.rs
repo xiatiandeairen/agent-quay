@@ -41,17 +41,60 @@ str_enum!(Reason {
 
 str_enum!(ReclaimReason { OwnerExit => "owner_exit", Idle => "idle", MaxHold => "max_hold" });
 
+/// 退出码：一个码只对应调用方的一种下一步，见 docs/design.md 6.2「退出码」（CASE-STATUS-3）。
+pub mod exit {
+    /// 完成，继续。
+    pub const DONE: i32 = 0;
+    /// 命令失败（failed、timeout），读日志改代码。
+    pub const FAILED: i32 = 1;
+    /// 还没完，接着等。
+    pub const PENDING: i32 = 2;
+    /// 写法错，改调用。
+    pub const USAGE: i32 = 3;
+    /// 可重试，原样再提交或重新借。
+    pub const RETRY: i32 = 4;
+    /// 需要人，把 message 转告用户。
+    pub const HUMAN: i32 = 5;
+
+    /// 多个对象合成一个退出码：取最需要处理的，5 > 3 > 1 > 4 > 2 > 0，不取数值最大（CASE-STATUS-2）。
+    pub fn worst(codes: impl IntoIterator<Item = i32>) -> i32 {
+        codes.into_iter().max_by_key(|c| rank(*c)).unwrap_or(DONE)
+    }
+
+    fn rank(code: i32) -> u8 {
+        match code {
+            HUMAN => 5,
+            USAGE => 4,
+            FAILED => 3,
+            RETRY => 2,
+            PENDING => 1,
+            _ => 0,
+        }
+    }
+}
+
+impl Reason {
+    pub fn exit_code(self) -> i32 {
+        match self {
+            Reason::Usage => exit::USAGE,
+            Reason::DeviceError | Reason::Busy => exit::RETRY,
+            Reason::Unschedulable | Reason::DeviceUnavailable => exit::HUMAN,
+        }
+    }
+}
+
 impl ExecStatus {
     pub fn is_terminal(self) -> bool {
         !matches!(self, ExecStatus::Queued | ExecStatus::Running)
     }
-    /// 退出码映射，见「执行对象」状态表。
     pub fn exit_code(self) -> i32 {
         match self {
-            ExecStatus::Ok => 0,
-            ExecStatus::Queued | ExecStatus::Running => 2,
-            ExecStatus::Rejected => 3,
-            _ => 1,
+            ExecStatus::Ok => exit::DONE,
+            ExecStatus::Failed | ExecStatus::Timeout => exit::FAILED,
+            ExecStatus::Queued | ExecStatus::Running => exit::PENDING,
+            ExecStatus::Interrupted | ExecStatus::Cancelled => exit::RETRY,
+            // 落库的 rejected 执行只有 unschedulable 一种（与 view::exec_json 一致）
+            ExecStatus::Rejected => Reason::Unschedulable.exit_code(),
         }
     }
 }
@@ -66,9 +109,11 @@ impl HoldStatus {
     }
     pub fn exit_code(self) -> i32 {
         match self {
-            HoldStatus::Waiting => 2,
-            HoldStatus::Rejected => 3,
-            _ => 0,
+            HoldStatus::Held | HoldStatus::Released => exit::DONE,
+            HoldStatus::Waiting => exit::PENDING,
+            HoldStatus::Reclaimed => exit::RETRY,
+            // 落库的 rejected 借用只有 device_error 一种（与 view::hold_json 一致）
+            HoldStatus::Rejected => Reason::DeviceError.exit_code(),
         }
     }
 }
@@ -175,12 +220,44 @@ mod tests {
     // CASE-STATUS-3
     #[test]
     fn exit_codes_follow_doc() {
-        assert_eq!(ExecStatus::Ok.exit_code(), 0);
-        assert_eq!(ExecStatus::Failed.exit_code(), 1);
-        assert_eq!(ExecStatus::Cancelled.exit_code(), 1);
-        assert_eq!(ExecStatus::Queued.exit_code(), 2);
-        assert_eq!(ExecStatus::Rejected.exit_code(), 3);
-        assert_eq!(HoldStatus::Reclaimed.exit_code(), 0);
-        assert_eq!(HoldStatus::Waiting.exit_code(), 2);
+        use ExecStatus as E;
+        use HoldStatus as H;
+        let exec = [
+            (E::Ok, 0),
+            (E::Failed, 1),
+            (E::Timeout, 1),
+            (E::Queued, 2),
+            (E::Running, 2),
+            (E::Interrupted, 4),
+            (E::Cancelled, 4),
+            (E::Rejected, 5),
+        ];
+        for (s, c) in exec {
+            assert_eq!(s.exit_code(), c, "{s:?}");
+        }
+        let hold = [(H::Held, 0), (H::Released, 0), (H::Waiting, 2), (H::Reclaimed, 4), (H::Rejected, 4)];
+        for (s, c) in hold {
+            assert_eq!(s.exit_code(), c, "{s:?}");
+        }
+        let reason =
+            [(Reason::Usage, 3), (Reason::DeviceError, 4), (Reason::Busy, 4), (Reason::Unschedulable, 5), (Reason::DeviceUnavailable, 5)];
+        for (r, c) in reason {
+            assert_eq!(r.exit_code(), c, "{r:?}");
+        }
+    }
+
+    // CASE-STATUS-2
+    #[test]
+    fn worst_exit_code_by_priority() {
+        use exit::worst;
+        assert_eq!(worst([2, 1]), 1, "running + failed");
+        assert_eq!(worst([4, 5]), 5, "cancelled + unschedulable");
+        assert_eq!(worst([0, 3]), 3, "ok + usage");
+        assert_eq!(worst([5, 3, 1, 4, 2, 0]), 5);
+        assert_eq!(worst([3, 1, 4, 2, 0]), 3);
+        assert_eq!(worst([1, 4, 2, 0]), 1);
+        assert_eq!(worst([4, 2, 0]), 4);
+        assert_eq!(worst([2, 0]), 2);
+        assert_eq!(worst([]), 0);
     }
 }

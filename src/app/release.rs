@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use aq_core::model::{ExecStatus, HoldStatus, ProcId};
+use aq_core::model::{exit, ExecStatus, HoldStatus, ProcId};
 use aq_core::ports::{Locks, Procs};
 use aq_store::Store;
 use aq_sys::spawn::{group_empty, killpg, SIGKILL, SIGTERM};
@@ -50,10 +50,14 @@ pub fn cancel(ctx: &Ctx, store: &mut Store, id: &str) -> AppResult<(Value, i32)>
     })?;
     let e = if e.status == ExecStatus::Running { wait_cancelled(ctx, store, &e)? } else { e };
     let mut v = view::exec_json(ctx, &e, None, None);
-    if e.status == ExecStatus::Running {
+    // 已停完（或本来就结束了）即 0；进程还没停，调用方要接着等，与 running 同为 2（CASE-CANCEL-6）
+    let code = if e.status == ExecStatus::Running {
         v["cancel_requested"] = serde_json::json!(true);
-    }
-    Ok((v, 0))
+        exit::PENDING
+    } else {
+        exit::DONE
+    };
+    Ok((v, code))
 }
 
 /// 等运行中的执行到终态，最多「宽限期 + 5 秒」。runner 不在时自己终止：拿到 runner 的锁说明 runner 已退出，

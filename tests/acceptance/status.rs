@@ -26,7 +26,7 @@ fn overview_has_seven_fields_and_lists_everything() {
 
 // CASE-STATUS-2
 #[test]
-fn multi_id_wait_exit_code_is_max() {
+fn multi_id_wait_exit_code_by_priority() {
     let e = Env::new();
     let ok = e.aq(&["run", "--wait", "0", "--", "fake-task", "--secs", "1"]);
     let bad = e.aq(&["run", "--wait", "0", "--", "fake-task", "--secs", "1", "--exit", "2"]);
@@ -40,6 +40,12 @@ fn multi_id_wait_exit_code_is_max() {
     assert!(t.elapsed() < Duration::from_secs(5));
     assert_eq!(s.code, 2, "未结束的取 2");
     e.aq(&["cancel", &slow.id()]);
+    let s = e.aq(&["status", &ok.id(), &slow.id()]);
+    assert_eq!((s.lines[1]["status"].as_str(), s.code), (Some("cancelled"), 4), "ok + cancelled 取可重试 4");
+    let s = e.aq(&["status", &bad.id(), &slow.id()]);
+    assert_eq!(s.code, 1, "failed + cancelled 取 1，不取数值最大的 4");
+    let s = e.aq(&["status", &slow.id(), &bad.id(), "ex_nonexistent"]);
+    assert_eq!(s.code, 3, "带上不存在的 id 取写法错 3");
 }
 
 // CASE-RUN-2
@@ -93,7 +99,7 @@ fn write_lock_held_over_5s_is_busy_and_unchanged() {
     let t = Instant::now();
     let r = e.aq(&["run", "--", "true"]);
     assert!(t.elapsed() >= Duration::from_secs(5));
-    assert_eq!((r.code, r.one()["reason"].as_str()), (1, Some("busy")), "{}", r.stdout);
+    assert_eq!((r.code, r.one()["reason"].as_str()), (4, Some("busy")), "{}", r.stdout);
     c.execute_batch("ROLLBACK").unwrap();
     assert_eq!(e.q_i64("SELECT count(*) FROM executions"), 0, "数据不变");
 }
@@ -113,7 +119,7 @@ fn db_deleted_recreated_and_unwritable_state_reports_path() {
     e.env("XDG_STATE_HOME", ro.to_str().unwrap());
     let r = e.aq(&["status"]);
     std::fs::set_permissions(&ro, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
-    assert_eq!(r.code, 1);
+    assert_eq!(r.code, 5);
     let msg = r.one()["message"].as_str().unwrap();
     assert!(msg.contains(ro.to_str().unwrap()) && msg.contains("sandbox"), "CASE-FAULT-7 给出需要放行的路径：{msg}");
 }

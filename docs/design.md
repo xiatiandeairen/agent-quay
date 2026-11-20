@@ -202,7 +202,7 @@ cancel： queued  → cancelled（runner 看到后退出）
 
 ```text
 不带 id：检查 → 第一行全机概况 → 之后每行是全机所有排队、运行中的执行和未归还的借用
-带 id  ：逐个查；带 --wait 时直到全部结束或超时；id 不存在 → rejected usage；退出码取最大
+带 id  ：逐个查；带 --wait 时直到全部结束或超时；id 不存在 → rejected usage；退出码按 6.2 的优先级取
 ```
 
 ### 4.6 检查
@@ -458,15 +458,15 @@ aq release <借用id>
 | `content_changed` | 已结束且为 true | 结果对应的不是最新代码 |
 | `reason` `message` | rejected | 原因枚举和一句说明 |
 
-| status | 含义 | 退出码 |
-| --- | --- | --- |
-| `queued` / `running` | 在等资源 / 正在执行 | 2 |
-| `ok` | 命令退出码为 0 | 0 |
-| `failed` | 命令退出码非 0 | 1 |
-| `timeout` | 超时被终止 | 1 |
-| `interrupted` | 意外中断（进程被杀、机器重启） | 1 |
-| `cancelled` | 被撤销 | 1 |
-| `rejected` | 没有执行就被拒绝 | 3 |
+| status | 含义 |
+| --- | --- |
+| `queued` / `running` | 在等资源 / 正在执行 |
+| `ok` | 命令退出码为 0 |
+| `failed` | 命令退出码非 0 |
+| `timeout` | 超时被终止 |
+| `interrupted` | 意外中断（进程被杀、机器重启） |
+| `cancelled` | 被撤销 |
+| `rejected` | 没有执行就被拒绝 |
 
 **借用对象**（hold、release、status）
 
@@ -481,15 +481,13 @@ aq release <借用id>
 | `unavailable` | rejected device_unavailable | 登记了但此刻不可用的真机，每项 `{type,id,name,why}` |
 | `undeclared` `config_snippet` | rejected 且有已连接但没登记的真机 | 这些设备，以及可整段替换进配置的片段 |
 
-| status | 含义 | 退出码 |
-| --- | --- | --- |
-| `waiting` | 排队等资源 | 2 |
-| `held` | 已借到 | 0 |
-| `released` | 已归还 | 0 |
-| `reclaimed` | 被自动收回 | 0 |
-| `rejected` | 没有借出就被拒绝 | 3 |
-
-cancel、release 的退出码只表示请求是否被接受：接受即 0。status 带多个 id 时退出码取最大（CASE-STATUS-2）。
+| status | 含义 |
+| --- | --- |
+| `waiting` | 排队等资源 |
+| `held` | 已借到 |
+| `released` | 已归还 |
+| `reclaimed` | 被自动收回 |
+| `rejected` | 没有借出就被拒绝 |
 
 | reason | 含义 |
 | --- | --- |
@@ -498,7 +496,25 @@ cancel、release 的退出码只表示请求是否被接受：接受即 0。stat
 | `device_error` | 设备创建或启动失败；整组已回滚，可重新 hold（CASE-HOLD-7） |
 | `device_unavailable` | 登记且此刻可用的真机不够；立即拒绝，不排队（CASE-DEV-2） |
 
-另有两种错误退出码为 1：等数据库写锁超过 5 秒（`reason` 为 `busy`，数据未改，稍后重试，CASE-FAULT-9）；状态目录不可写或被沙箱拦截（只有消息，写明路径，CASE-FAULT-7）。
+另有两种不属于任何对象的错误：等数据库写锁超过 5 秒（`reason` 为 `busy`，数据未改，稍后重试，CASE-FAULT-9）；状态目录不可写或被沙箱拦截（只有 `message`，写明路径，CASE-FAULT-7）。
+
+**退出码**
+
+一个退出码只对应调用方的一种下一步；具体原因看 JSON 的 `status`、`reason`，退出码只做粗分路（CASE-STATUS-3）。
+
+| 码 | 含义 | 包含 | 调用方下一步 |
+| --- | --- | --- | --- |
+| 0 | 完成 | ok、held、released；cancel 返回时已停完；`--help`、`--version`；不带 id 的 `aq status` | 继续 |
+| 1 | 命令失败 | failed、timeout | 读 `log` 改代码 |
+| 2 | 还没完 | queued、running、waiting（含 `disk_full`）；cancel 已受理但进程还没停（`cancel_requested: true`） | `aq status <id> --wait` 接着等 |
+| 3 | 写法错 | rejected `usage` | 改调用 |
+| 4 | 可重试 | interrupted、cancelled、reclaimed；rejected `device_error`；`busy` | 原样再提交或重新借 |
+| 5 | 需要人 | rejected `unschedulable`、`device_unavailable`（含带 `undeclared` 的拒绝）；状态目录不可写（只有 `message`） | 把 `message` 转告用户 |
+
+- 带多个 id 时按最需要处理的取一个：5 > 3 > 1 > 4 > 2 > 0（CASE-STATUS-2）。
+- `disk_full` 归 2：任务仍在排队，磁盘腾出后自动开始；需要人清理由 `message` 说明。
+- cancelled 归 4：共用同一次执行的调用方会被别人的撤销连带，重新提交即可；自己撤销的不用理会。reclaimed 归 4：设备被收走，重新借即可。
+- 写法错用 3，与常见惯例（bash 内建命令、clap 用 2 表示用法错误）不同：aq 的 2 表示「还没完」。
 
 **全机概况**（`aq status` 不带 id 时的第一行，CASE-STATUS-1）
 

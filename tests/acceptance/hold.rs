@@ -85,9 +85,9 @@ fn two_groups_same_phone_and_account_all_or_nothing() {
 fn unschedulable_and_memory_bound_sims() {
     let e = Env::with_config(&DEFAULT_CONFIG.replace("mem = \"28G\"", "mem = \"4G\""));
     let r = e.aq(&["hold", "ios-device", "ios-device"]);
-    assert_eq!((r.code, r.one()["reason"].as_str()), (3, Some("unschedulable")));
+    assert_eq!((r.code, r.one()["reason"].as_str()), (5, Some("unschedulable")));
     let r = e.aq(&["hold", "ios-sim", "ios-sim"]);
-    assert_eq!((r.code, r.one()["reason"].as_str()), (3, Some("unschedulable")), "借的量超整机");
+    assert_eq!((r.code, r.one()["reason"].as_str()), (5, Some("unschedulable")), "借的量超整机");
     let a = e.aq(&["hold", "ios-sim"]);
     assert_eq!(a.status(), "held");
     let b = e.aq(&["hold", "ios-sim", "--wait", "1"]);
@@ -100,7 +100,7 @@ fn create_failure_rolls_back_whole_group() {
     let e = Env::new();
     std::fs::write(e.path("sim/fail_create"), "").unwrap();
     let r = e.aq(&["hold", "ios-sim", "ios-device", "--account", "a"]);
-    assert_eq!((r.code, r.one()["reason"].as_str()), (3, Some("device_error")), "{}", r.stdout);
+    assert_eq!((r.code, r.one()["reason"].as_str()), (4, Some("device_error")), "{}", r.stdout);
     assert_eq!(e.q_i64("SELECT count(*) FROM hold_devices") + e.q_i64("SELECT count(*) FROM hold_accounts"), 0);
     std::fs::remove_file(e.path("sim/fail_create")).unwrap();
     let again = e.aq(&["hold", "ios-device", "--account", "a"]);

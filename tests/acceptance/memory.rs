@@ -123,6 +123,6 @@ fn default_capacity_from_physical_memory() {
     let cfg = DEFAULT_CONFIG.replace("mem = \"28G\"\n", "").replace("[ios-sim]\nmem = \"3G\"", "[ios-sim]\nmem = \"30G\"");
     let e = Env::with_config(&cfg);
     let r = e.aq(&["hold", "ios-sim"]);
-    assert_eq!((r.code, r.status()), (3, "rejected"), "{}", r.stdout);
+    assert_eq!((r.code, r.status()), (5, "rejected"), "{}", r.stdout);
     assert!(r.one()["message"].as_str().unwrap().contains("27648MB"), "{}", r.stdout);
 }

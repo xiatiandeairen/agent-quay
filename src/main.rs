@@ -8,6 +8,7 @@ use std::fs::File;
 
 use app::ctx::Ctx;
 use app::error::{AppError, AppResult};
+use aq_core::model::exit;
 use clap::Parser;
 use cli::{Cli, Cmd};
 use serde_json::Value;
@@ -94,7 +95,7 @@ fn user_cmd(cmd: Cmd) -> i32 {
             (one(app::hold::hold(&ctx, s, &app::hold::HoldArgs { devices, accounts, wait_s: wait })), human)
         }
         Cmd::Release { id, human } => (one(app::release::release(&ctx, s, &id)), human),
-        _ => return 3,
+        _ => return exit::USAGE,
     };
     if human {
         humanize(&ctx, s, r)
@@ -147,7 +148,7 @@ fn internal(cmd: Cmd) -> i32 {
             }
             Ok(())
         }),
-        _ => 3,
+        _ => exit::USAGE,
     }
 }
 
@@ -180,7 +181,7 @@ fn main() {
             let msg = e.render().to_string();
             let first = msg.lines().next().unwrap_or("invalid arguments").trim_start_matches("error: ").to_string();
             println!("{}", app::view::rejected("usage", &format!("{first}; see aq --help")));
-            std::process::exit(3);
+            std::process::exit(exit::USAGE);
         }
     };
     let code = match cli.cmd {

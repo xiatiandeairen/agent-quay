@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use aq_core::model::{DeviceType, ExecStatus, HoldStatus};
+use aq_core::model::{exit, DeviceType, ExecStatus, HoldStatus, Reason};
 use aq_core::ports::SysRes;
 use aq_store::Store;
 use serde_json::{json, Value};
@@ -83,7 +83,7 @@ fn one(ctx: &Ctx, store: &Store, id: &str, soonest: Option<i64>) -> AppResult<(V
         }
         return Ok((v, h.status.exit_code(), h.status.is_settled()));
     }
-    Ok((view::rejected_with_id(id, "usage", "no such id (or already pruned by retention)"), 3, true))
+    Ok((view::rejected_with_id(id, "usage", "no such id (or already pruned by retention)"), Reason::Usage.exit_code(), true))
 }
 
 /// 内存压力持续了多久（读状态目录的开始时间，检查时已更新）。
@@ -120,7 +120,7 @@ fn missing_devices(ctx: &Ctx, store: &Store, hold_id: &str) -> AppResult<Vec<Str
     Ok(gone)
 }
 
-/// 带 id：逐个查；带 --wait 每隔 poll 查一次，直到全部结束或到期。退出码取最大。
+/// 带 id：逐个查；带 --wait 每隔 poll 查一次，直到全部结束或到期。退出码按优先级取最需要处理的（CASE-STATUS-2）。
 pub fn by_ids(ctx: &Ctx, store: &mut Store, ids: &[String], wait_s: Option<u64>) -> AppResult<(Vec<Value>, i32)> {
     let mut waiting = check::check(ctx, store)?.plan.admit;
     let deadline = Instant::now() + Duration::from_secs(wait_s.unwrap_or(0));
@@ -133,7 +133,7 @@ pub fn by_ids(ctx: &Ctx, store: &mut Store, ids: &[String], wait_s: Option<u64>)
             if !done && round > 0 {
                 waiting = check::check(ctx, store)?.plan.admit; // 等了一阵还没结束：按最新一次检查报在等什么
             }
-            let code = rows.iter().map(|r| r.1).max().unwrap_or(0);
+            let code = exit::worst(rows.iter().map(|r| r.1));
             let mut out: Vec<Value> = rows.into_iter().map(|r| r.0).collect();
             let note = pressure_note(ctx);
             for v in &mut out {

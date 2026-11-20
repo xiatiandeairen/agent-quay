@@ -267,7 +267,7 @@ fn cancel_gives_up_waiting_with_cancel_requested() {
     let t = Instant::now();
     let c = e.aq(&["cancel", &r.id()]);
     assert!(t.elapsed() < Duration::from_secs(8));
-    assert_eq!((c.code, c.status()), (0, "running"), "{}", c.stdout);
+    assert_eq!((c.code, c.status()), (2, "running"), "{}", c.stdout);
     assert_eq!(c.one()["cancel_requested"], true);
     assert_eq!(e.wait_status(&r.id(), 30, &["cancelled"]).status(), "cancelled");
 }

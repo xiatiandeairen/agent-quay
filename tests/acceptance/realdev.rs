@@ -44,7 +44,7 @@ fn only_declared_unavailable_rejected_without_queueing() {
     ios(&e, &[]);
     let r = e.aq(&["hold", "ios-device"]);
     let o = r.one();
-    assert_eq!((r.code, o["status"].as_str(), o["reason"].as_str()), (3, Some("rejected"), Some("device_unavailable")), "{}", r.stdout);
+    assert_eq!((r.code, o["status"].as_str(), o["reason"].as_str()), (5, Some("rejected"), Some("device_unavailable")), "{}", r.stdout);
     assert_eq!(o["unavailable"][0]["id"], "phone-1");
     assert!(o["unavailable"][0]["why"].as_str().unwrap().contains("cannot find"), "{o}");
     assert!(o.get("undeclared").is_none() && o.get("config_snippet").is_none(), "没有未声明的设备就不带");
@@ -58,7 +58,7 @@ fn undeclared_connected_listed_never_lent() {
     ios(&e, &[("own-phone", "Own Phone", "wired")]);
     let r = e.aq(&["hold", "ios-device"]);
     let o = r.one();
-    assert_eq!((r.code, o["reason"].as_str()), (3, Some("device_unavailable")), "{}", r.stdout);
+    assert_eq!((r.code, o["reason"].as_str()), (5, Some("device_unavailable")), "{}", r.stdout);
     assert_eq!(o["undeclared"], json!([{"type": "ios-device", "id": "own-phone", "name": "Own Phone"}]));
     assert_eq!(o["config_snippet"], "[ios-device]\nids = [\"phone-1\", \"own-phone\"]");
     assert_eq!(e.q_i64("SELECT count(*) FROM hold_devices"), 0, "未声明的绝不借出");
@@ -71,7 +71,7 @@ fn empty_list_unschedulable_with_snippet() {
     ios(&e, &[("new-phone", "New Phone", "localNetwork")]);
     let r = e.aq(&["hold", "ios-device"]);
     let o = r.one();
-    assert_eq!((r.code, o["reason"].as_str()), (3, Some("unschedulable")), "{}", r.stdout);
+    assert_eq!((r.code, o["reason"].as_str()), (5, Some("unschedulable")), "{}", r.stdout);
     assert_eq!(o["undeclared"][0]["id"], "new-phone");
     assert_eq!(o["config_snippet"], "[ios-device]\nids = [\"new-phone\"]");
     ios(&e, &[]);
@@ -114,7 +114,7 @@ fn android_unauthorized_rejected_emulator_not_listed() {
     std::fs::write(e.path("emu/real-devices"), "android-1\tunauthorized usb:1-1 model:Pixel_9\n").unwrap();
     let r = e.aq(&["hold", "android-device"]);
     let o = r.one();
-    assert_eq!((r.code, o["reason"].as_str()), (3, Some("device_unavailable")), "{}", r.stdout);
+    assert_eq!((r.code, o["reason"].as_str()), (5, Some("device_unavailable")), "{}", r.stdout);
     assert!(o["unavailable"][0]["why"].as_str().unwrap().contains("not authorized"), "{o}");
     assert!(o.get("undeclared").is_none(), "emulator-5554 是模拟器，不算未声明的真机：{o}");
 }
@@ -126,7 +126,7 @@ fn missing_devicectl_rejected_and_sims_never_probe() {
     e.env("AQ_DEVICECTL", "/nonexistent/devicectl");
     let r = e.aq(&["hold", "ios-device"]);
     let o = r.one();
-    assert_eq!((r.code, o["reason"].as_str()), (3, Some("device_unavailable")), "{}", r.stdout);
+    assert_eq!((r.code, o["reason"].as_str()), (5, Some("device_unavailable")), "{}", r.stdout);
     assert!(o["unavailable"][0]["why"].as_str().unwrap().contains("devicectl"), "{o}");
     let e = Env::new();
     assert_eq!(e.aq(&["hold", "ios-sim"]).status(), "held");

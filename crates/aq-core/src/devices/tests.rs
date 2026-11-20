@@ -69,12 +69,12 @@ fn judge_counts_only_declared_and_usable() {
 
     let v = judge(&req(vec![I, I]), &cap(&["p1", "p2", "p3"]), &[(I, Ok(scan.clone()))]);
     let (reason, msg) = v.reject.unwrap();
-    assert_eq!(reason, "device_unavailable");
+    assert_eq!(reason, Reason::DeviceUnavailable);
     assert!(msg.contains("p2: Developer Mode is off") && msg.contains(&format!("p3: {NOT_FOUND}")), "{msg}");
     assert_eq!(v.snippet.as_deref(), Some("[ios-device]\nids = [\"p1\", \"p2\", \"p3\", \"own\"]"));
 
     let v = judge(&req(vec![I, I, I, I]), &cap(&["p1", "p2", "p3"]), &[(I, Ok(scan))]);
-    assert_eq!(v.reject.map(|r| r.0), Some("unschedulable"), "比清单还多是永远满足不了");
+    assert_eq!(v.reject.map(|r| r.0), Some(Reason::Unschedulable), "比清单还多是永远满足不了");
 }
 
 // CASE-DEV-2
@@ -83,7 +83,7 @@ fn judge_scan_error_makes_all_declared_unavailable() {
     use DeviceType::AndroidDevice as A;
     let c = Capacity { android_devices: vec!["a1".into()], ..Capacity::default() };
     let v = judge(&req(vec![A]), &c, &[(A, Err("找不到 adb".into()))]);
-    assert_eq!(v.reject.map(|r| r.0), Some("device_unavailable"));
+    assert_eq!(v.reject.map(|r| r.0), Some(Reason::DeviceUnavailable));
     assert_eq!(v.unavailable[0].why, "找不到 adb");
 }
 

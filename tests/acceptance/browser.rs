@@ -59,7 +59,7 @@ fn open_failure_rolls_back_group() {
     let e = Env::new();
     std::fs::write(e.path("browser/fail_open"), "").unwrap();
     let r = e.aq(&["hold", "browser", "ios-device", "--account", "a"]);
-    assert_eq!((r.code, r.one()["reason"].as_str()), (3, Some("device_error")), "{}", r.stdout);
+    assert_eq!((r.code, r.one()["reason"].as_str()), (4, Some("device_error")), "{}", r.stdout);
     assert!(e.browsers().is_empty(), "起了一半的会话被关掉：{:?}", e.browsers());
     assert_eq!(e.q_i64("SELECT count(*) FROM hold_devices") + e.q_i64("SELECT count(*) FROM hold_accounts"), 0);
 }

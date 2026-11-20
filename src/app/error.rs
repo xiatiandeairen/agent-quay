@@ -1,4 +1,4 @@
-//! 命令级错误 → 一行 JSON + 退出码。usage → rejected 3；busy → 1（数据未改，稍后重试）；其他 → 1。
+//! 命令级错误 → 一行 JSON + 退出码。usage → rejected 3；busy → 4（数据未改，稍后重试）；其他（状态目录不可写等环境问题）→ 5。
 
 use aq_store::StoreError;
 
@@ -29,9 +29,11 @@ impl AppError {
         }
     }
     pub fn exit_code(&self) -> i32 {
+        use aq_core::model::{exit, Reason};
         match self {
-            AppError::Usage(_) => 3,
-            _ => 1,
+            AppError::Usage(_) => Reason::Usage.exit_code(),
+            AppError::Busy => Reason::Busy.exit_code(),
+            AppError::Fatal(_) => exit::HUMAN,
         }
     }
 }

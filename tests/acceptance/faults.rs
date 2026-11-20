@@ -42,7 +42,7 @@ fn kill_runner_only_command_continues_then_interrupted() {
     assert!(until(10, || done.exists()), "命令照常跑完");
     std::thread::sleep(Duration::from_millis(300));
     let s = e.aq(&["status", &r.id()]);
-    assert_eq!((s.code, s.status()), (1, "interrupted"));
+    assert_eq!((s.code, s.status()), (4, "interrupted"));
     assert_eq!(
         e.q_i64(&format!("SELECT exit_code IS NULL AND finished_at IS NOT NULL FROM executions WHERE id='{}'", r.id())),
         1,
