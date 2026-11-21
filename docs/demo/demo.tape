@@ -1,6 +1,6 @@
 # Records docs/demo/demo.gif and demo.mp4. From the repo root:
 #   docs/demo/setup.sh && docs/demo/layout.sh && vhs docs/demo/demo.tape
-# The aq calls are real; build.sh and test.sh stand in for heavy builds (3 CPU cores each).
+# The aq calls are real; build.sh and test.sh stand in for heavy builds (4 CPU cores each).
 Output docs/demo/demo.gif
 Output docs/demo/demo.mp4
 Require tmux
@@ -30,7 +30,7 @@ Type "c"
 Type "aq run -- ./test.sh" Enter
 Sleep 17s
 
-# Two agents each borrow a simulator. Creating and booting them takes 30–60 s, cut here.
+# Two agents each borrow a simulator. aq boots them one after the other (60–120 s in all), cut here.
 Ctrl+B
 Type "a"
 Type "clear; aq hold ios-sim" Enter
@@ -38,6 +38,6 @@ Ctrl+B
 Type "c"
 Type "clear; aq hold ios-sim" Enter
 Hide
-Sleep 75s
+Sleep 120s
 Show
 Sleep 5s
