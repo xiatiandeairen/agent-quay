@@ -17,7 +17,7 @@ use aq_sys::sysres::RealSys;
 use super::error::AppError;
 use crate::config::Config;
 
-/// 时间与容量阈值。正式值是文档里的数；验收测试用 AQ_T_* 环境变量缩短（见 docs/design.md 的测试注入表）。
+/// 时间与容量阈值。这里的默认值就是正式值；验收测试用同名的 AQ_T_* 环境变量缩短。
 #[derive(Debug, Clone)]
 pub struct Tuning {
     pub poll: Duration,

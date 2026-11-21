@@ -31,7 +31,7 @@ pub struct Probes {
     pub owner_alive: HashMap<String, bool>,
     /// holds/<id>.used 的修改时间；没有文件时用 acquired_at。
     pub last_used_at: HashMap<String, i64>,
-    /// 此刻探测到有 aq 之外的进程在用的借用 id（usage 模块判定，design.md 5.5）。
+    /// 此刻探测到有 aq 之外的进程在用的借用 id（usage 模块判定，design.md 3.3）。
     pub in_use: HashSet<String>,
     pub sys: SysSample,
 }
@@ -89,7 +89,7 @@ fn reclaim_reason(h: &HoldView, s: &Snapshot, p: &Probes, lim: &Limits, used: bo
     if s.now_ms - acquired >= lim.max_hold_ms {
         return Some(ReclaimReason::MaxHold);
     }
-    // 只有浏览器、桌面会话的借用探测不到使用，不按闲置收回（design.md 5.5）
+    // 只有浏览器、桌面会话的借用探测不到使用，不按闲置收回（design.md 3.3）
     let probed = s.devices.iter().any(|d| d.hold_id == h.id && d.dtype.usage_probed());
     let last = p.last_used_at.get(&h.id).copied().unwrap_or(acquired);
     (probed && !used && s.now_ms - last >= lim.idle_reclaim_ms).then_some(ReclaimReason::Idle)

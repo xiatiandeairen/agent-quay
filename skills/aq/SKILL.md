@@ -24,7 +24,7 @@ description: aq 排队：在本机跑编译或测试（xcodebuild、swift build/
 2. 看 `status`：
    - `queued` / `running`：执行返回里的 `next` 命令接着等；也可以放后台跑。
    - `ok`：继续。带 `content_changed: true` 时，结果可能不对应最新代码：只有你的代码在运行期间改过才需要重跑。
-   - `failed`：读 `log` 里的输出修代码。`timeout`：看日志判断是卡住还是太慢。`interrupted`：环境问题，直接重试。
+   - `failed`：`exit_code` 是命令自己的退出码，读 `log` 里的输出修代码。`timeout`：看日志判断是卡住还是太慢。`interrupted`：环境问题，直接重试。
    - `rejected`：按 `reason` 处理（见「出错时」），或按退出码处理（见「退出码」）。
 3. 同时跑几个：每个用 `--wait 0` 提交，再 `aq status <id1> <id2> --wait <秒>` 一起等。
 
@@ -53,11 +53,13 @@ description: aq 排队：在本机跑编译或测试（xcodebuild、swift build/
 | 情况 | 怎么办 |
 | --- | --- |
 | `waiting_for` 含 `disk_full` | 磁盘清理之前不会开始。把 `message` 转告用户（还差多少 GB、需要清理磁盘）；不想等就 `aq cancel <id>`。不要绕过 aq 直接跑 |
+| `waiting_for` 含 `mem_pressure` | 机器内存吃紧，压力回落后自动开始；`mem_pressure_s` 是已持续的秒数，持续太久会带 `message`：压力来自 aq 以外的程序，转告用户 |
 | 带 `blocked_by` | 你要的资源被排在前面的 `<id>` 占着，它开始后就轮到你，接着等即可 |
 | `rejected` + `usage` | 写法不对（缺 `--`、设备类型拼错、id 不存在），改调用 |
 | `rejected` + `unschedulable` | 需求超过整机容量，或真机比登记的多，永远等不到；告诉用户 |
 | `rejected` + `device_unavailable` | 登记过的真机此刻连不上：把 `unavailable[].name` 和 `why` 告诉用户，请用户连上后再借 |
 | 拒绝结果带 `undeclared`、`config_snippet` | 有已连接但没登记的真机：把它们的名字和 `config_snippet` 给用户，由用户决定登记哪台、删掉不想借出的再粘进 config.toml |
+| 查借用时带 `missing` | 列出的设备已被 aq 以外删掉（如模拟器服务被重置）；借用还在，`aq release` 后重新借 |
 | `rejected` + `device_error` | 模拟器或浏览器创建失败，这次什么都没借到，可以重新 hold |
 | `reason: busy` | aq 暂时忙，什么都没改，稍后重试同一条命令 |
 | 只有 `message`、没有 `reason` | 环境问题（目录不可写、沙箱拦截），把 message 里的路径告诉用户 |

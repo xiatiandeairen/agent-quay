@@ -1,4 +1,4 @@
-//! 借出的设备是否在用（design.md 5.5）：aq 之外的进程、aq run 的参数；借出上限。
+//! 借出的设备是否在用（design.md 3.3）：aq 之外的进程、aq run 的参数；借出上限。
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};

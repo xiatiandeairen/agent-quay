@@ -80,7 +80,7 @@ impl Default for Capacity {
 /// 时间阈值。验收测试通过环境变量缩短，正式值见各字段注释。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Limits {
-    /// 设备连续多久没人用就收回借用：30 分钟（design.md 5.5）。
+    /// 设备连续多久没人用就收回借用：30 分钟（design.md 3.3）。
     pub idle_reclaim_ms: i64,
     /// 借出多久不管是否在用都收回：4 小时（CASE-RECLAIM-9）。
     pub max_hold_ms: i64,

@@ -1,4 +1,4 @@
-//! 检查时探测借出的设备是否在用（design.md 5.5）：列出本机进程交给 aq-core 的 usage 判定；
+//! 检查时探测借出的设备是否在用（design.md 3.3）：列出本机进程交给 aq-core 的 usage 判定；
 //! 浏览器、桌面会话不探测。
 
 use std::collections::HashSet;

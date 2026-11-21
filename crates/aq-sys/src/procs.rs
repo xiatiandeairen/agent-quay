@@ -86,7 +86,7 @@ fn argv0_name(pid: i64) -> Option<String> {
     (!base.is_empty()).then_some(base)
 }
 
-/// 本机所有进程（进程号、父进程号、可执行文件路径、argv），供判定设备是否在用（design.md 5.5）。
+/// 本机所有进程（进程号、父进程号、可执行文件路径、argv），供判定设备是否在用（design.md 3.3）。
 /// 读不到 argv 的（别的用户的进程）argv 为空；`aq_descendant` 由 aq-core 的 usage 模块填。
 pub fn list_all() -> Vec<ProcInfo> {
     let mut buf = vec![0u8; argmax()];

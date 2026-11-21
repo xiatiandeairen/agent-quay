@@ -1,4 +1,4 @@
-//! 对外 JSON：每个对象一行，只含决策所需字段，按规定时机出现。字段与 docs/design.md 的输出字段表一致。
+//! 对外 JSON：每个对象一行，只含决策所需字段，按规定时机出现。给调用方的字段说明在 skills/aq/SKILL.md，字段变了要同步改它。
 
 use aq_core::model::{ExecStatus, HoldStatus};
 use aq_core::retry;

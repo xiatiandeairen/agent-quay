@@ -9,7 +9,7 @@
 
 | 端 | 测试命令 | 怎么编译、安装、启动 | 标识和数据位置 |
 |---|---|---|---|
-| macOS 命令行 | `just check`（格式、lint、单元、契约、存储、集成、文档核对）；只跑一块：`cargo test --test acceptance -- <模块>::`；长回放：`just m3`；真 simctl 建删一台：`just drill-sim` | `just install` 装到 `~/.local/bin/aq`；或 `cargo install --path . --locked` | 账本 `${XDG_STATE_HOME:-~/.local/state}/aq/aq.db`，日志 `…/aq/logs/`，自身日志 `…/aq/aq.log`；配置 `${XDG_CONFIG_HOME:-~/.config}/aq/config.toml`；测试注入的假件和时间阈值见 design.md「测试与验收」 |
+| macOS 命令行 | `just check`（格式、lint、单元、契约、存储、集成、文档核对）；只跑一块：`cargo test --test acceptance -- <模块>::`；长回放：`just m3`；真 simctl 建删一台：`just drill-sim` | `just install` 装到 `~/.local/bin/aq`；或 `cargo install --path . --locked` | 账本 `${XDG_STATE_HOME:-~/.local/state}/aq/aq.db`，日志 `…/aq/logs/`，自身日志 `…/aq/aq.log`；配置 `${XDG_CONFIG_HOME:-~/.config}/aq/config.toml`；测试注入的假件在 `tests/support/`，时间阈值见 `src/app/ctx.rs` 的 `Tuning` |
 
 ## 提交与执行
 

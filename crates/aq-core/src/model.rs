@@ -41,7 +41,7 @@ str_enum!(Reason {
 
 str_enum!(ReclaimReason { OwnerExit => "owner_exit", Idle => "idle", MaxHold => "max_hold" });
 
-/// 退出码：一个码只对应调用方的一种下一步，见 docs/design.md 6.2「退出码」（CASE-STATUS-3）。
+/// 退出码：一个码只对应调用方的一种下一步，分组原因见 docs/design.md 3.5（CASE-STATUS-3）。
 pub mod exit {
     /// 完成，继续。
     pub const DONE: i32 = 0;
@@ -124,7 +124,7 @@ impl DeviceType {
     pub fn is_virtual(self) -> bool {
         !matches!(self, DeviceType::IosDevice | DeviceType::AndroidDevice)
     }
-    /// aq 能探测是否在用的设备（看进程参数，design.md 5.5）；浏览器、桌面会话不探测。
+    /// aq 能探测是否在用的设备（看进程参数，design.md 3.3）；浏览器、桌面会话不探测。
     pub fn usage_probed(self) -> bool {
         !matches!(self, DeviceType::Browser | DeviceType::Desktop)
     }

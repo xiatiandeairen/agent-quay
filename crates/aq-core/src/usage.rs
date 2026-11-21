@@ -1,4 +1,4 @@
-//! 设备是否在用的判定（design.md 5.5）：纯函数，输入进程列表和设备 id，不列进程、不调 adb。
+//! 设备是否在用的判定（design.md 3.3）：纯函数，输入进程列表和设备 id，不列进程、不调 adb。
 //! 进程由 aq-sys 列出。
 
 use std::collections::{HashMap, HashSet};
