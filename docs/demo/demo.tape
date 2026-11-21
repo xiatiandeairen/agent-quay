@@ -1,16 +1,23 @@
-# Records docs/demo/demo.gif and demo.mp4. From the repo root:
-#   docs/demo/setup.sh && docs/demo/layout.sh && vhs docs/demo/demo.tape
+# Records the raw demo video that docs/demo/zoom.py turns into demo.gif and demo.mp4.
+# Run docs/demo/record.sh from the repo root; it prepares /tmp/aq-demo and the background first.
 # The aq calls are real; build.sh and test.sh stand in for heavy builds (4 CPU cores each).
-Output docs/demo/demo.gif
-Output docs/demo/demo.mp4
+# Recorded at 2x so zoom.py can zoom in up to 2x without blur.
+Output "/tmp/aq-demo/raw.mp4"
 Require tmux
 Set Shell bash
-Set FontSize 16
-Set Width 1440
-Set Height 760
-Set Padding 16
+Set FontSize 30
+Set Width 2880
+Set Height 1620
+Set Padding 24
+Set Margin 80
+Set MarginFill "/tmp/aq-demo/bg.png"
+Set WindowBar Colorful
+Set WindowBarSize 60
+Set BorderRadius 20
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 45ms
+# VHS drops frames (and speeds the video up) when it cannot capture 2x frames in time; 15 fps keeps real time.
+Set Framerate 15
 
 Hide
 Type "BASH_SILENCE_DEPRECATION_WARNING=1 tmux -u -L aqdemo attach -t demo" Enter
