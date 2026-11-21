@@ -21,8 +21,7 @@ size:
 drill-sim:
     cargo test --test contracts simulator_real_xcrun -- --ignored
 
-# 长测试（M3：30 天记录按 1000 倍速回放，约 45 分钟）。先编译再直接运行测试程序：全机统一排队的 test runner（CARGO_TARGET_*_RUNNER），
-# 经它跑会让同时进行的 just check 一直等；换构建目录也躲不开
+# 长测试（M3：30 天记录按 1000 倍速回放，约 45 分钟）。先编译，再直接运行测试程序
 m3:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -32,6 +31,10 @@ m3:
 # 核对用例表 docs/cases.md 与测试是否对得上
 cases:
     scripts/check-cases.py
+
+# 发版：默认只预览版本号和变更说明；确认后加 --yes。直接运行，不经 aq run（用法见脚本开头）
+release *args:
+    scripts/release.sh {{args}}
 
 # 安装到 ~/.local/bin/aq（会覆盖旧版 aq）
 install:

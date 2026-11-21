@@ -14,7 +14,7 @@
 - 每次状态变化调用 `ctx.log_transition`（无检查）。
 - 改状态只走 `aq-store` 里带原状态条件的函数（数据库触发器只兜「终态再改」，倒退无检查）。
 - 列出进行中的执行用两次等值查询，原因见 design.md §3.5（无检查）。
-- 对外命令、输出、退出码变了，同一个提交里改 `skills/aq/SKILL.md`（无检查）。
+- 对外命令、输出、退出码变了，同一个提交里改 `skills/aq/SKILL.md`，并在提交正文写一行 `BREAKING CHANGE: <调用方要改什么>`，发版时据此升次版本号（无检查）。
 - 新增用例先在 `docs/cases.md` 加一行，再在守它的测试上方标 `CASE-*` 编号，不守需求行为的测试标 `// 表外：<原因>`（由 `just cases` 兜底）。
 - 不用 `unwrap`/`expect`/`panic`，文件不超过 400 行、函数不超过 60 行（由 clippy 和 `scripts/check-size.sh` 兜底）。
 - 已发布的迁移和迁移夹具只增不改，结构变更加新迁移（由 `scripts/guard.sh` 兜底）。
@@ -33,6 +33,7 @@
 | 加或改用例 | docs/cases.md |
 | 排查卡住、没复用、被收回 | design.md §4 |
 | 本机换成当前代码的 aq | `just install` |
+| 发版（只在用户说发版时） | `just release`：先预览，用户确认后加 `--yes` |
 
 ## 坑
 
