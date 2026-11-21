@@ -9,7 +9,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-aq-core = { version = "0.5.0", path = "../aq-core" }
+aq-core = { version = "0.6.0", path = "../aq-core" }
 blake3 = "1.8.7"
 etcetera = "0.11.0"
 is-ai-agent = "0.7.0"

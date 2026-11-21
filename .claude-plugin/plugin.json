@@ -1,7 +1,7 @@
 {
   "name": "agent-quay",
   "displayName": "aq",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Queue heavy builds and tests, merge duplicate builds, and lend iOS/Android simulators, real devices and test accounts to parallel agent sessions on one Mac. Gives every session the aq skill. Requires the aq command (brew install xiatiandeairen/tap/aq).",
   "author": {
     "name": "xiatiandeairen",
