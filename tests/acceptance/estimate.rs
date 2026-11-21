@@ -318,8 +318,11 @@ fn mem_after_history(e: &Env, a: &std::path::Path, b: &std::path::Path) -> (i64,
 #[test]
 fn nogit_dirs_estimated_separately() {
     let e = Env::new();
-    let p = e.project(Layout::NoGit);
-    let (a, b) = mem_after_history(&e, &p.root, &p.dirs[0]);
+    let (da, db) = (e.work().join("nogit-a"), e.work().join("nogit-b"));
+    for d in [&da, &db] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    let (a, b) = mem_after_history(&e, &da, &db);
     assert!(a >= 1000, "第一个目录按自己的 1G 实测记账：{a}MB");
     assert!(b < 600, "CASE-EST-19 第二个目录按自己的 50M 实测记账：{b}MB（第一个 {a}MB）");
 }

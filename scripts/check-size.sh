@@ -5,6 +5,6 @@ cd "$(dirname "$0")/.."
 bad=0
 while IFS= read -r f; do
   n=$(wc -l < "$f" | tr -d ' ')
-  if [ "$n" -gt 400 ]; then echo "文件超过 400 行：$f（$n 行），按职责拆分"; bad=1; fi
+  if [ "$n" -gt 400 ]; then echo "文件超过 400 行：${f}（${n} 行），按职责拆分"; bad=1; fi
 done < <(find src crates tests -name '*.rs')
 exit $bad
