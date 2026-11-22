@@ -28,6 +28,10 @@
 
 <sub>aq 调用都是真实的，`build.sh` 和 `test.sh` 代替重型编译，空等已剪掉。</sub>
 
+<sub>带英文旁白的版本（请开声音）：</sub>
+
+https://github.com/user-attachments/assets/bb739f81-8770-48cd-b46f-2bab9513148b
+
 ## 目录
 
 - [为什么需要 aq](#为什么需要-aq)
