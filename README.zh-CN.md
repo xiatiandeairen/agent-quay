@@ -24,9 +24,11 @@
 
 <br>
 
-![三个 agent 调用 aq：两次相同的编译只跑一次、共用结果，测试排队等重任务名额，最后两个 agent 各借到一台新模拟器](docs/demo/demo.gif)
+![三个 agent 调用 aq：两次相同的编译只跑一次、共用结果，测试排队等那一个重任务名额](docs/demo/demo.gif)
 
-<sub>aq 调用都是真实的，`build.sh` 和 `test.sh` 代替重型编译；等待创建模拟器的时间和几秒空闲已剪掉。用 `docs/demo/record.sh` 可重录。</sub>
+<sub>aq 调用都是真实的，`build.sh` 和 `test.sh` 代替重型编译，空等已剪掉。带英文旁白的版本（请开声音）：</sub>
+
+<video src="https://github.com/user-attachments/assets/7f4e5509-1001-4114-8d1f-ad9e5314bf39" controls width="100%"></video>
 
 ## 目录
 
