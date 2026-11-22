@@ -30,7 +30,7 @@ English · [简体中文](README.zh-CN.md)
 
 <sub>With narration (sound on):</sub>
 
-https://github.com/user-attachments/assets/3bc152b9-c7ca-4a99-aaa9-ae88c0eb13aa
+https://github.com/user-attachments/assets/5c49a39e-a1cd-4911-aa79-5034b4ac880d
 
 ## Contents
 
