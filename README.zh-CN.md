@@ -122,7 +122,7 @@ cargo install --git https://github.com/xiatiandeairen/agent-quay --locked
 插件包含：
 
 - `aq` skill（`skills/aq/SKILL.md`）：告诉 agent 什么时候、怎么调用 `aq` 的说明，本身不运行任何东西。
-- 一个 SessionStart hook（`scripts/session-start.sh`）：检查 `PATH` 里有没有 `aq`；没有时往会话上下文加一行，让 agent 提醒用户运行 `brew install xiatiandeairen/tap/aq`。不安装任何东西，不改设置，不联网。
+- 一个 SessionStart hook（`hooks/session-start.sh`）：检查 `PATH` 里有没有 `aq`；没有时往会话上下文加一行，让 agent 提醒用户运行 `brew install xiatiandeairen/tap/aq`。不安装任何东西，不改设置，不联网。
 
 插件不带 `aq` 程序本身，也没有 MCP server，`aq` 按上面的方式另装。
 

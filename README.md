@@ -122,7 +122,7 @@ The plugin gives every session the `aq` skill, so agents know when and how to us
 What the plugin contains:
 
 - The `aq` skill (`skills/aq/SKILL.md`): instructions that tell the agent when and how to call `aq`. It runs nothing by itself.
-- A SessionStart hook (`scripts/session-start.sh`): checks whether `aq` is on `PATH`. If it is missing, it adds one line to the session context asking the agent to tell the user to run `brew install xiatiandeairen/tap/aq`. It does not install anything, change any setting or use the network.
+- A SessionStart hook (`hooks/session-start.sh`): checks whether `aq` is on `PATH`. If it is missing, it adds one line to the session context asking the agent to tell the user to run `brew install xiatiandeairen/tap/aq`. It does not install anything, change any setting or use the network.
 
 The plugin does not ship the `aq` binary or any MCP server. Install `aq` separately as shown above.
 

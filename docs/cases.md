@@ -116,7 +116,6 @@
 | CASE-RECLAIM-5 | 认不出借用者（环境变量认不出 agent，或认出了但父进程链上找不到它的会话主进程），调用 `aq hold` 的 shell 随即退出 | 借用仍为 held，不因调用方退出收回；只按闲置收回 | 集成 |
 | CASE-RECLAIM-6 | 删除借出的模拟器时，CoreSimulator 日志目录里有它和别的设备的子目录 | 它的日志目录一起删除，别的不动 | 集成 |
 | CASE-RECLAIM-7 | release 和自动收回同时触发 | 只有一个生效，终态唯一，模拟器只删一次 | 集成 |
-| CASE-RECLAIM-8 | 装了 `scripts/stop-hook.sh` 的 Claude Code 会话借着设备闲置 5 分钟后结束一轮回答 | 提醒一次 `aq release`，不拦截；第二次结束不再提醒 | 实机 |
 | CASE-RECLAIM-9 | 借出超过上限（默认 4 小时），期间设备一直在用；差一分钟到上限；借用者退出同时超上限 | 超上限 reclaimed（原因为超过借用上限），不管是否在用；不到上限不收；同时成立时只出一个动作，原因为借用者退出 | 单元；集成 |
 | CASE-RECLAIM-10 | `aq run` 的参数里整段带着某个 held 借用的设备 id（如 `-destination id=<UDID>`），命令运行时间超过闲置阈值 | 提交时和排队、运行期间每次检查都刷新该借用，期间一直 held | 单元；集成；真 xcodebuild：实机 |
 | CASE-RECLAIM-11 | 进程参数里带 UDID 的情形：xcodebuild `-destination platform=iOS Simulator,id=<UDID>`、agent-device 的 runner；可执行文件在 `CoreSimulator/Devices/<UDID>/` 下；launchd_sim；aq 自己或 aq runner 的后代（含 aq 起的 Chrome）；参数里是另一台的 UDID | 前两种算在用；其余都不算 | 单元 |

@@ -134,11 +134,9 @@ impl Ctx {
         self.procs.ancestors(ppid).into_iter().find(|(_, name, _)| *name == v.argv0)
     }
 
-    /// 借用结束：删掉 .used（使用方据此发现已收回）和 Stop hook 的 .reminded 标记。
+    /// 借用结束：删掉 .used（使用方据此发现已收回）。
     pub fn clear_hold_files(&self, id: &str) {
-        for f in [self.dirs.used_file(id), self.dirs.holds.join(format!("{id}.reminded"))] {
-            let _ = std::fs::remove_file(f); // 文件不在就算已删
-        }
+        let _ = std::fs::remove_file(self.dirs.used_file(id)); // 文件不在就算已删
     }
 
     pub fn now(&self) -> i64 {
