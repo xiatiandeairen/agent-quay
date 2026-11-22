@@ -26,9 +26,7 @@ English · [简体中文](README.zh-CN.md)
 
 ![Three agents call aq: two identical builds run once and share the result, then the tests wait for the one heavy slot](docs/demo/demo.gif)
 
-<sub>Real aq calls; `build.sh` and `test.sh` stand in for heavy builds, and idle waits are cut. With narration (sound on):</sub>
-
-<video src="https://github.com/user-attachments/assets/7f4e5509-1001-4114-8d1f-ad9e5314bf39" controls width="100%"></video>
+<sub>Real aq calls; `build.sh` and `test.sh` stand in for heavy builds, and idle waits are cut.</sub>
 
 ## Contents
 
