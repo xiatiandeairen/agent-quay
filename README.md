@@ -28,6 +28,10 @@ English · [简体中文](README.zh-CN.md)
 
 <sub>Real aq calls; `build.sh` and `test.sh` stand in for heavy builds, and idle waits are cut.</sub>
 
+<sub>With narration (sound on):</sub>
+
+https://github.com/user-attachments/assets/bb739f81-8770-48cd-b46f-2bab9513148b
+
 ## Contents
 
 - [Why aq](#why-aq)
