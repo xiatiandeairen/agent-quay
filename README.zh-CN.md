@@ -30,7 +30,7 @@
 
 <sub>带英文旁白的版本（请开声音）：</sub>
 
-https://github.com/user-attachments/assets/3bc152b9-c7ca-4a99-aaa9-ae88c0eb13aa
+https://github.com/user-attachments/assets/5c49a39e-a1cd-4911-aa79-5034b4ac880d
 
 ## 目录
 
