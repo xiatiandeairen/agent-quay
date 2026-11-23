@@ -25,7 +25,7 @@ description: aq 排队：在本机跑编译或测试（xcodebuild、swift build/
    - `queued` / `running`：执行返回里的 `next` 命令接着等；也可以放后台跑。
    - `ok`：继续。带 `content_changed: true` 时，结果可能不对应最新代码：只有你的代码在运行期间改过才需要重跑。
    - `failed`：`exit_code` 是命令自己的退出码，读 `log` 里的输出修代码。`timeout`：看日志判断是卡住还是太慢。`interrupted`：环境问题，直接重试。
-   - `rejected`：按 `reason` 处理（见「出错时」），或按退出码处理（见「退出码」）。
+   - `rejected`：按 `reason` 或退出码处理（见「输出和退出码」）。
 3. 同时跑几个：每个用 `--wait 0` 提交，再 `aq status <id1> <id2> --wait <秒>` 一起等。
 
 这一步结束的标准：每个 id 都拿到终态（ok / failed / timeout / interrupted / cancelled / rejected）。还在 queued、running 时不下结论。
@@ -48,9 +48,11 @@ description: aq 排队：在本机跑编译或测试（xcodebuild、swift build/
 - 上下文丢了：`aq status` 列出全机活动的执行和未归还的借用，第一行是忙闲概况。
 - 要看在等什么、被谁挡住：加 `--human`。
 
-## 出错时
+## 输出和退出码
 
-| 情况 | 怎么办 |
+`status` 的终态怎么处理见上面两节；下面是等待和拒绝时要看的字段。
+
+| 输出 | 怎么办 |
 | --- | --- |
 | `waiting_for` 含 `disk_full` | 磁盘清理之前不会开始。把 `message` 转告用户（还差多少 GB、需要清理磁盘）；不想等就 `aq cancel <id>`。不要绕过 aq 直接跑 |
 | `waiting_for` 含 `mem_pressure` | 机器内存吃紧，压力回落后自动开始；`mem_pressure_s` 是已持续的秒数，持续太久会带 `message`：压力来自 aq 以外的程序，转告用户 |
@@ -62,12 +64,8 @@ description: aq 排队：在本机跑编译或测试（xcodebuild、swift build/
 | 查借用时带 `missing` | 列出的设备已被 aq 以外删掉（如模拟器服务被重置）；借用还在，`aq release` 后重新借 |
 | `rejected` + `device_error` | 模拟器或浏览器创建失败，这次什么都没借到，可以重新 hold |
 | `reason: busy` | aq 暂时忙，什么都没改，稍后重试同一条命令 |
-| 只有 `message`、没有 `reason` | 环境问题（目录不可写、沙箱拦截），把 message 里的路径告诉用户 |
-| 找不到 aq，或 `aq --help` 里没有 run/hold | 告诉用户在 aq 仓库里跑 `just install` |
 
-## 退出码
-
-| 码 | 下一步 |
+| 退出码 | 下一步 |
 | --- | --- |
 | 0 | 完成，继续 |
 | 1 | 命令失败：读 `log` 修代码 |
@@ -77,3 +75,10 @@ description: aq 排队：在本机跑编译或测试（xcodebuild、swift build/
 | 5 | 需要人：把 `message` 转告用户 |
 
 多个 id 一起查时，退出码取最需要处理的那个；每个 id 的情况看各自那行的 `status`。
+
+## 出错时
+
+| 现象 | 怎么办 |
+| --- | --- |
+| 只有 `message`、没有 `reason` | 环境问题（目录不可写、沙箱拦截），把 message 里的路径告诉用户 |
+| 找不到 aq，或 `aq --help` 里没有 run/hold | 告诉用户在 aq 仓库里跑 `just install` |

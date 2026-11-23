@@ -1,0 +1,25 @@
+[
+  {
+    "id": "Q1",
+    "name": "跑测试并借模拟器",
+    "cwd": "/Users/taoxia/Workspace/self/agent-quay",
+    "turn": "我要在这个仓库跑 cargo test，同时借一台 iOS 模拟器做一次界面验证。只告诉我要跑的命令、每一步看到什么输出算完成，不用执行。",
+    "expect": [
+      "测试写成 aq run -- cargo test（或项目已有入口如 just test），不直接跑也不用 pgrep/sleep 轮询",
+      "按 status 判断：queued/running 用返回的 next 或 aq status <id> --wait 接着等，拿到终态才下结论；failed 读 log",
+      "借设备写成 aq hold ios-sim，waiting 时 aq status <借用id> --wait 等到 held，只操作返回的 devices[].id",
+      "验证结束 aq release <借用id>，看到 released 才算结束"
+    ]
+  },
+  {
+    "id": "Q2",
+    "name": "磁盘不足和真机不可用",
+    "cwd": "/Users/taoxia/Workspace/self/agent-quay",
+    "turn": "aq run 返回 {\"id\":\"r42\",\"status\":\"queued\",\"waiting_for\":[\"disk_full\"],\"message\":\"need 12.3 GB more free space\"}，退出码 2。另外 aq hold ios-device 返回 rejected，reason 是 device_unavailable，unavailable 里是 [{\"name\":\"Tao's iPhone\",\"why\":\"not connected\"}]。分别怎么办？只给做法，不用执行。",
+    "expect": [
+      "disk_full：把还差 12.3 GB、需要清理磁盘转告用户；不绕过 aq 直接跑；不想等可以 aq cancel r42",
+      "退出码 2 表示还没完，要等就 aq status r42 --wait",
+      "device_unavailable：把 Tao's iPhone 和 not connected 告诉用户，请用户连上后再借；不自己改 config.toml"
+    ]
+  }
+]
