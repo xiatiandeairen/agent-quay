@@ -92,10 +92,10 @@ fn unfit_combinations_say_what_is_missing() {
     let e = run(Some("37"), None).unwrap_err();
     assert!(e.contains("Write the full API level, e.g. android-emu@37.0") && !e.contains("sdkmanager"), "{e}");
     let e = run(Some("35"), Some("nope")).unwrap_err();
-    assert!(e.contains("no Android device profile named nope; e.g. pixel_6, pixel_7, pixel_tablet"), "{e}");
+    assert!(e.contains("no Android device profile named nope; e.g. pixel_7, pixel_6, pixel_tablet"), "{e}");
     let e = run(Some("35"), Some("wearos_rect")).unwrap_err();
     assert!(
-        e.contains("wearos_rect is a Wear OS profile") && e.contains("Pick a phone or tablet profile, e.g. android-emu@35:pixel_6"),
+        e.contains("wearos_rect is a Wear OS profile") && e.contains("Pick a phone or tablet profile, e.g. android-emu@35:pixel_7"),
         "{e}"
     );
     let missing = plan(&spec(None, None), &def(), &images()[1..], "arm64-v8a", None).unwrap_err();

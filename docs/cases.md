@@ -97,7 +97,7 @@
 | CASE-HOLD-11 | 借出的模拟器在 held 期间被 aq 以外删掉 | `aq status <id>` 仍为 held，多出 `missing` 列出已不在的设备 id；aq.log 记一笔 | 集成 |
 | CASE-HOLD-13 | iOS 指定版本、机型：`ios-sim@26.2`、`"ios-sim@26.2:iPhone 17 Pro"`、`"ios-sim:iPhone 18 Pro"`、`ios-sim@27.2`（本机还有只给单一机型用的 27.2）、一组两台 `ios-sim@26.2 ios-sim@27.2` | 都 held，输出字段不变；按写的版本和机型新建，不写的版本取本机最新、机型取配置；同版本有多个 runtime 时用通用的那个；一组里各台各用各的版本 | 单元；集成 |
 | CASE-HOLD-19 | Android 指定版本、机型：`android-emu@35`、`android-emu:pixel_tablet`、`android-emu@35:pixel_7`、`"android-emu@35:Nexus 5X"`、和 iOS 混借 | 都 held；新建的 AVD 用写的 API level 的 arm64 镜像和写的机型，不写的镜像、机型取配置 AVD 的，内存（`hw.ramSize`）总是照抄配置 AVD | 集成 |
-| CASE-HOLD-14 | 组合不了：iOS 版本没装、版本没写全（`@26`）、版本不支持写的机型、版本不支持配置的默认机型；Android 镜像没装、只有 x86_64 镜像、机型不存在、手表等专用机型配手机镜像；一组里只有一项不行 | 提交时立即 rejected，reason=unschedulable，退出码 5；message 写明缺什么、本机有什么（已装版本或该版本支持的机型），没装的附安装命令，没写全且有以它开头的已装版本时提示写全；账本不留借用、不建任何设备 | 集成 |
+| CASE-HOLD-14 | 组合不了：iOS 版本没装、版本没写全（`@26`）、机型名不存在、只是大小写不对、写的版本跑不了这个机型（含配置的默认机型）、不写版本时本机没有能跑它的版本（太新、已被淘汰）；Android 镜像没装、只有 x86_64 镜像、机型不存在、手表等专用机型配手机镜像；一组里只有一项不行 | 提交时立即 rejected，reason=unschedulable，退出码 5；message 先说原因（名字不存在 / 需要哪个系统版本范围 / 缺哪个镜像），再举至多 3 个可用的例子，再给查完整列表或安装的命令；大小写不对时直接给出正确写法；没写全且有以它开头的已装版本时提示写全；账本不留借用、不建任何设备 | 集成 |
 | CASE-HOLD-15 | 写法错：`ios-device@27`、`browser:x`、`desktop@1`、`ios-sim@`、`"ios-sim@26.2:"`、`ios-sim@26.2@27.2` | rejected，reason=usage，退出码 3，message 说明哪类设备支持什么写法 | 单元；集成 |
 | CASE-HOLD-16 | `aq hold android-emu`（不写版本、机型） | 新建 AVD 的镜像、机型、内存与配置 AVD 一致；启动的是新 AVD，配置 AVD 本身从不被启动、内容不变 | 集成 |
 | CASE-HOLD-17 | 账本里有升级前写入的 waiting、held 借用（请求里没有版本、机型） | 照常查询；waiting 的轮到后按默认值新建，最终 held | 集成 |

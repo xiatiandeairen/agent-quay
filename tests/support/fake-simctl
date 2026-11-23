@@ -6,8 +6,16 @@ echo "$*" >> "$D/calls.log"
 case "$1" in
   list)
     if [ "$2" = runtimes ]; then
-      # 含一个只支持单一机型的运行时（真实机器上有），aq 不能选它
-      echo '{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-2","version":"26.2","isAvailable":true,"platform":"iOS","supportedDeviceTypes":[{"name":"iPhone 17 Pro"}]},{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-2","version":"27.2","isAvailable":true,"platform":"iOS","supportedDeviceTypes":[{"name":"iPhone 18 Pro"},{"name":"iPhone 17 Pro"}]},{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4","version":"27.2","isAvailable":true,"platform":"iOS","supportedDeviceTypes":[{"name":"iPhone Duo"}]}]}'
+      # 含一个只支持单一机型的运行时（真实机器上有），aq 不能选它；supportedDeviceTypes 像真的一样新机型在前
+      # $FAKE_SIM_ONLY=26.2 时只报 26.2（模拟只装了一个版本的机器）
+      r26='{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-2","version":"26.2","isAvailable":true,"platform":"iOS","supportedDeviceTypes":[{"name":"iPhone 17 Pro"},{"name":"iPhone 17 Pro Max"},{"name":"iPhone Air"},{"name":"iPhone 16 Pro"}]}'
+      if [ "$FAKE_SIM_ONLY" = 26.2 ]; then echo "{\"runtimes\":[$r26]}"; else
+      echo '{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-2","version":"26.2","isAvailable":true,"platform":"iOS","supportedDeviceTypes":[{"name":"iPhone 17 Pro"},{"name":"iPhone 17 Pro Max"},{"name":"iPhone Air"},{"name":"iPhone 16 Pro"}]},{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-2","version":"27.2","isAvailable":true,"platform":"iOS","supportedDeviceTypes":[{"name":"iPhone 18 Pro"},{"name":"iPhone 17 Pro"},{"name":"iPhone 17 Pro Max"},{"name":"iPhone Air"},{"name":"iPhone 16 Pro"}]},{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4","version":"27.2","isAvailable":true,"platform":"iOS","supportedDeviceTypes":[{"name":"iPhone Duo"}]}]}'
+      fi
+    elif [ "$2" = devicetypes ]; then
+      # Xcode 认识的机型和能跑的系统版本范围；iPhone 8 被 iOS 17 起淘汰
+      u='"maxRuntimeVersionString":"65535.255.255"'
+      echo "{\"devicetypes\":[{\"name\":\"iPhone 18 Pro\",\"minRuntimeVersionString\":\"27.0.0\",$u},{\"name\":\"iPhone 17 Pro\",\"minRuntimeVersionString\":\"26.0.0\",$u},{\"name\":\"iPhone 17 Pro Max\",\"minRuntimeVersionString\":\"26.0.0\",$u},{\"name\":\"iPhone Air\",\"minRuntimeVersionString\":\"26.0.0\",$u},{\"name\":\"iPhone 16 Pro\",\"minRuntimeVersionString\":\"18.0.0\",$u},{\"name\":\"iPhone Duo\",\"minRuntimeVersionString\":\"27.1.0\",$u},{\"name\":\"iPhone 8\",\"minRuntimeVersionString\":\"11.0.0\",\"maxRuntimeVersionString\":\"16.4.0\"}]}"
     else
       printf '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-27-2":['
       sep=""

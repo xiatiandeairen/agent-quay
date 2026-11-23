@@ -191,6 +191,15 @@ fn pick_image(v: &str, def: &Image, images: &[Image], host: &str) -> Result<Imag
     })
 }
 
+/// 某类用途的机型例子：avdmanager 按字母排，开头是 Galaxy Nexus 这类老机型，所以先举编号最新的 pixel_<数字>，不够再按原顺序补；
+/// 名字带空格的不举（写进 `android-emu@35:<机型>` 要加引号，容易抄错）。
+fn examples<'a>(profiles: &'a [Profile], k: &str) -> Vec<&'a str> {
+    let num = |id: &str| id.strip_prefix("pixel_").and_then(|r| r.split('_').next()).and_then(|n| n.parse::<u32>().ok());
+    let mut ids: Vec<&str> = profiles.iter().filter(|p| p.kind == k && !p.id.contains(' ')).map(|p| p.id.as_str()).collect();
+    ids.sort_by_key(|id| (std::cmp::Reverse(num(id)), id.len()));
+    ids.into_iter().take(3).collect()
+}
+
 /// 按写的版本、机型挑镜像和机型配置，不写的取配置 AVD 的；内存总是沿用配置 AVD（CASE-HOLD-19、CASE-HOLD-14、CASE-HOLD-16）。
 /// profiles 只在写了机型时需要。错误文字给调用方看。
 pub fn plan(
@@ -210,7 +219,7 @@ pub fn plan(
     if let Some(m) = &spec.model {
         let profiles = profiles.unwrap_or_default();
         let ik = kind(&image.tag);
-        let example = |k: &str| profiles.iter().filter(|p| p.kind == k).map(|p| p.id.as_str()).take(3).collect::<Vec<_>>();
+        let example = |k: &str| examples(profiles, k);
         let Some(p) = profiles.iter().find(|p| p.id == *m) else {
             return Err(format!(
                 "no Android device profile named {m}; e.g. {}; full list: avdmanager list device -c",
