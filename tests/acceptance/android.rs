@@ -11,17 +11,22 @@ fn emu_calls(e: &Env) -> String {
 
 // CASE-HOLD-2
 #[test]
-fn android_emu_new_readonly_instance_on_aq_port() {
+fn android_emu_new_avd_readonly_instance_on_aq_port() {
     let e = Env::new();
     let r = e.aq(&["hold", "android-emu"]);
     assert_eq!((r.code, r.status()), (0, "held"), "{}", r.stdout);
     assert_eq!(r.one()["devices"][0], serde_json::json!({"type": "android-emu", "id": "emulator-5600"}));
     let calls = emu_calls(&e);
+    let name = e.dev_name(&r.id(), 1);
     assert!(
-        calls.contains("-avd test_avd") && calls.contains("-read-only") && calls.contains("-no-window") && calls.contains("-port 5600"),
+        calls.contains(&format!("-avd {name}"))
+            && calls.contains("-read-only")
+            && calls.contains("-no-window")
+            && calls.contains("-port 5600"),
         "{calls}"
     );
-    assert_eq!(std::fs::read_to_string(e.state().join("emu/5600.name")).unwrap(), e.dev_name(&r.id(), 1));
+    assert_eq!(e.aq_avds(), std::slice::from_ref(&name), "每组新建自己的 AVD，放在状态目录");
+    assert_eq!(std::fs::read_to_string(e.state().join("emu/5600.name")).unwrap(), name);
     assert!(e.state().join(format!("holds/{}.used", r.id())).exists());
 }
 
@@ -37,6 +42,9 @@ fn two_groups_get_distinct_ports() {
     assert_eq!((a.status(), b.status()), ("held", "held"), "{} {}", a.stdout, b.stdout);
     assert_ne!(a.one()["devices"][0]["id"], b.one()["devices"][0]["id"]);
     assert_eq!(e.emus(), ["5600", "5602"]);
+    let mut want = vec![e.dev_name(&a.id(), 1), e.dev_name(&b.id(), 1)];
+    want.sort();
+    assert_eq!(e.aq_avds(), want, "两组各有自己的 AVD");
 }
 
 // CASE-RECLAIM-1
