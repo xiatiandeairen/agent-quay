@@ -35,12 +35,13 @@ description: aq 排队：在本机跑编译或测试（xcodebuild、swift build/
 ## 借设备和账号
 
 1. `aq hold <设备类型>... [--account <账号名>]...`，设备类型：`ios-sim`、`android-emu`、`ios-device`、`android-device`、`browser`、`desktop`；要几台写几次。整组一次借到，或整组排队。
+   - 模拟器可以指定系统版本和机型：`ios-sim@26.2`、`"ios-sim@26.2:iPhone 16 Pro"`、`android-emu@35:pixel_7`（Android 写 API level 和机型配置名）；不写就用本机最新的 iOS、配置的 AVD 和机型。要什么版本、机型就写什么，不要借到默认的再自己另建。
    - `waiting`：`aq status <借用id> --wait <秒>` 等到 `held`。
    - 真机（`ios-device`、`android-device`）只借用户在 `~/.config/aq/config.toml` 的 `[ios-device]`、`[android-device]` 段 `ids` 里登记过、此刻连得上的（有线或同网无线都算）。没登记的手机可能是用户自用的，aq 不会借出；这个文件只由用户改，你不要改。
 2. 只操作返回的 `devices[].id` 和 `accounts`：
    - xcodebuild 用 `-destination id=<id>`；simctl 用 `<id>`；adb 用 `-s <id>`。
    - browser：`agent-browser --session <id> ...`，aq 已经把这个会话的 Chrome 开好；desktop：`agent-desktop --session <id> ...`，保持默认无窗口模式。
-   - 模拟器和浏览器会话由 aq 新建和删除，你只用它给的这些，不要自己删除模拟器、关闭这些浏览器会话。
+   - 模拟器只通过 `aq hold` 借：不要自己 `simctl create/boot/erase/delete`，也不要自己 `emulator -avd`、`avdmanager create`，本机原有、不是 aq 建的模拟器也一样。借到的版本或机型不对，`aq release` 后用 `@版本:机型` 重新借。浏览器会话由 aq 打开和关闭，不要自己关。
 3. 验证结束立即 `aq release <借用id>`，看到 `released` 才算这一步结束。没还的设备 aq 也会收回（`reclaimed`），那只是兜底，不能代替 release。
 
 ## 找回和查看
@@ -58,7 +59,7 @@ description: aq 排队：在本机跑编译或测试（xcodebuild、swift build/
 | `waiting_for` 含 `mem_pressure` | 机器内存吃紧，压力回落后自动开始；`mem_pressure_s` 是已持续的秒数，持续太久会带 `message`：压力来自 aq 以外的程序，转告用户 |
 | 带 `blocked_by` | 你要的资源被排在前面的 `<id>` 占着，它开始后就轮到你，接着等即可 |
 | `rejected` + `usage` | 写法不对（缺 `--`、设备类型拼错、id 不存在），改调用 |
-| `rejected` + `unschedulable` | 需求超过整机容量，或真机比登记的多，永远等不到；告诉用户 |
+| `rejected` + `unschedulable` | 读 `message`：本机没装这个版本 → 把版本和 message 里的安装命令告诉用户，用户同意后用 `aq run -- <安装命令>` 安装，装好再借；版本不支持这个机型 → 换 message 里列出的机型重新借；版本没写全 → 按提示写全；其余（超过整机容量、真机比登记的多）永远等不到，告诉用户 |
 | `rejected` + `device_unavailable` | 登记过的真机此刻连不上：把 `unavailable[].name` 和 `why` 告诉用户，请用户连上后再借 |
 | 拒绝结果带 `undeclared`、`config_snippet` | 有已连接但没登记的真机：把它们的名字和 `config_snippet` 给用户，由用户决定登记哪台、删掉不想借出的再粘进 config.toml |
 | 查借用时带 `missing` | 列出的设备已被 aq 以外删掉（如模拟器服务被重置）；借用还在，`aq release` 后重新借 |

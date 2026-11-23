@@ -7,6 +7,7 @@ compile_error!("aq supports macOS only (it uses libproc for processes and simctl
 pub mod agent;
 pub mod ai;
 pub mod applog;
+pub mod avd;
 pub mod browser;
 pub mod clock;
 pub mod cmd;

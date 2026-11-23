@@ -110,7 +110,7 @@ pub struct FakeSim {
     devs: RefCell<HashMap<String, String>>,
 }
 impl Simulator for FakeSim {
-    fn create(&self, name: &str) -> Result<String, String> {
+    fn create(&self, name: &str, _spec: &aq_core::devspec::DeviceSpec) -> Result<String, String> {
         let u = format!("U-{}", self.devs.borrow().len());
         self.devs.borrow_mut().insert(u.clone(), name.into());
         Ok(u)

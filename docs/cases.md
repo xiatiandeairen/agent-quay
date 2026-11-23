@@ -83,18 +83,25 @@
 
 | 编号 | 场景 | 预期效果 | 验证 |
 |---|---|---|---|
-| CASE-HOLD-1 | `aq hold ios-sim` | held；模拟器为新建并已启动，名为 `aq-<账本标识>-<借用id>-1`，机型为配置值 | 集成；真 simctl：实机 |
-| CASE-HOLD-2 | `aq hold android-emu`，两组同时借 | 按配置的专用 AVD 用只读、无窗口方式新起实例，设备 id 为 5600–5680 端口的 emulator；两组端口不同 | 集成 |
+| CASE-HOLD-1 | `aq hold ios-sim` | held；模拟器为新建并已启动，名为 `aq-<账本标识>-<借用id>-1`；不写版本、机型时用本机最新的 iOS 和配置机型，写了按写的建（CASE-HOLD-13） | 集成；真 simctl：实机 |
+| CASE-HOLD-2 | `aq hold android-emu`，两组同时借 | 每组新建自己的 AVD（名字同设备名，放在 aq 状态目录），无窗口启动，设备 id 为 5600–5680 端口的 emulator；两组端口不同 | 集成 |
 | CASE-HOLD-3 | 借 `browser`、`desktop`；多个 agent 同时借 | 每组拿到一个新会话名；可以同时借，只按内存排队 | 集成 |
 | CASE-HOLD-4 | 一次借多台设备和多个账号（含 iOS、Android、浏览器混合）；两组同时抢同一台真机和同一账号 | 整组一次借到，设备顺序与请求一致；抢不到的一组整组等待，不占其中任何一项 | 集成 |
 | CASE-HOLD-5 | 账号或真机已被借出时另一组借它 | waiting，退出码 2；前者归还后拿到 | 集成 |
 | CASE-HOLD-6 | 借的真机多于清单、所需内存超过整机；内存暂时只够一台模拟器时借第二台 | 前两者 rejected unschedulable；后者 waiting | 单元；集成 |
-| CASE-HOLD-7 | 模拟器、模拟器实例或浏览器会话创建失败（同组还借了真机和账号） | rejected，reason=device_error；整组回滚，真机和账号立即可被别人借；AVD 被非只读模拟器占用时提示配专用 AVD | 集成 |
+| CASE-HOLD-7 | 模拟器、模拟器实例或浏览器会话创建失败（同组还借了真机和账号） | rejected，reason=device_error；整组回滚，真机和账号立即可被别人借 | 集成 |
 | CASE-HOLD-8 | `--wait 5` 返回 waiting 后再查 | 创建期间仍为 waiting 且内存已预留；建好后为 held，设备 id 已回填，闲置计时文件已建 | 集成 |
 | CASE-HOLD-9 | 同一台机器上两个账本（不同 `XDG_STATE_HOME`）各借 1 台 ios-sim 和 1 个浏览器会话，两边反复对账；账本 A 还有一台建好后崩溃没记账的半成品 | 两边借出的设备都还在；A 的半成品被 A 删掉；各自归还后各自删掉 | 单元；集成；真 simctl 两个实例：实机 |
 | CASE-HOLD-10 | 机器上有旧格式名字（不带账本标识）的残留模拟器 `aq-hd_x-1` | 非默认账本不动；默认账本（`~/.local/state/aq`）对账时删掉 | 单元；集成 |
 | CASE-HOLD-12 | 台数上限 N（`sim_slots`）；已有 N 台 iOS 模拟器或 Android 实例（含还没删完的）时再借一台；一次就要超过 N 台；借浏览器会话 | 前者 waiting，`waiting_for: ["sim_slots"]`，带 `next`，归还一台并删完后放行；一次要超过 N 台的 rejected unschedulable；浏览器会话不计台数 | 单元；集成；真 simctl 连借 4 + 1 台：实机 |
 | CASE-HOLD-11 | 借出的模拟器在 held 期间被 aq 以外删掉 | `aq status <id>` 仍为 held，多出 `missing` 列出已不在的设备 id；aq.log 记一笔 | 集成 |
+| CASE-HOLD-13 | iOS 指定版本、机型：`ios-sim@26.2`、`"ios-sim@26.2:iPhone 17 Pro"`、`"ios-sim:iPhone 18 Pro"`、`ios-sim@27.2`（本机还有只给单一机型用的 27.2）、一组两台 `ios-sim@26.2 ios-sim@27.2` | 都 held，输出字段不变；按写的版本和机型新建，不写的版本取本机最新、机型取配置；同版本有多个 runtime 时用通用的那个；一组里各台各用各的版本 | 单元；集成 |
+| CASE-HOLD-19 | Android 指定版本、机型：`android-emu@35`、`android-emu:pixel_tablet`、`android-emu@35:pixel_7`、`"android-emu@35:Nexus 5X"`、和 iOS 混借 | 都 held；新建的 AVD 用写的 API level 的 arm64 镜像和写的机型，不写的镜像、机型取配置 AVD 的，内存（`hw.ramSize`）总是照抄配置 AVD | 集成 |
+| CASE-HOLD-14 | 组合不了：iOS 版本没装、版本没写全（`@26`）、版本不支持写的机型、版本不支持配置的默认机型；Android 镜像没装、只有 x86_64 镜像、机型不存在、手表等专用机型配手机镜像；一组里只有一项不行 | 提交时立即 rejected，reason=unschedulable，退出码 5；message 写明缺什么、本机有什么（已装版本或该版本支持的机型），没装的附安装命令，没写全且有以它开头的已装版本时提示写全；账本不留借用、不建任何设备 | 集成 |
+| CASE-HOLD-15 | 写法错：`ios-device@27`、`browser:x`、`desktop@1`、`ios-sim@`、`"ios-sim@26.2:"`、`ios-sim@26.2@27.2` | rejected，reason=usage，退出码 3，message 说明哪类设备支持什么写法 | 单元；集成 |
+| CASE-HOLD-16 | `aq hold android-emu`（不写版本、机型） | 新建 AVD 的镜像、机型、内存与配置 AVD 一致；启动的是新 AVD，配置 AVD 本身从不被启动、内容不变 | 集成 |
+| CASE-HOLD-17 | 账本里有升级前写入的 waiting、held 借用（请求里没有版本、机型） | 照常查询；waiting 的轮到后按默认值新建，最终 held | 集成 |
+| CASE-HOLD-18 | `aq hold --help`、`aq --help` | 列出 6 种设备类型、`@<版本>:<机型>` 写法和例子；`--account`、`--wait` 有说明 | 集成 |
 
 ## 真机
 
@@ -120,6 +127,7 @@
 | CASE-RECLAIM-10 | `aq run` 的参数里整段带着某个 held 借用的设备 id（如 `-destination id=<UDID>`），命令运行时间超过闲置阈值 | 提交时和排队、运行期间每次检查都刷新该借用，期间一直 held | 单元；集成；真 xcodebuild：实机 |
 | CASE-RECLAIM-11 | 进程参数里带 UDID 的情形：xcodebuild `-destination platform=iOS Simulator,id=<UDID>`、agent-device 的 runner；可执行文件在 `CoreSimulator/Devices/<UDID>/` 下；launchd_sim；aq 自己或 aq runner 的后代（含 aq 起的 Chrome）；参数里是另一台的 UDID | 前两种算在用；其余都不算 | 单元 |
 | CASE-RECLAIM-12 | Android：`adb -s emulator-5600 shell …`；emulator、qemu 本体带 `-port 5600`；参数是 `emulator-56001`、`emulator-560` | 第一种算在用；本体和不整段匹配的不算 | 单元；集成；agent-device 真模拟器：实机 |
+| CASE-RECLAIM-13 | Android 实例 release、自动收回后；建好 AVD 后、启动前进程被杀；别的账本的 AVD | 实例结束后它的 AVD 目录随之删除，删完才不计内存；半成品 AVD 在下一次对账时删掉；别的账本的不动 | 集成 |
 
 ## 撤销
 

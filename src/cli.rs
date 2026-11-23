@@ -2,6 +2,12 @@
 
 use clap::{Parser, Subcommand};
 
+/// `aq hold --help` 末尾的例子：agent 多半只读 help，不读 skill（CASE-HOLD-18）。
+const HOLD_EXAMPLES: &str = "Examples:
+  aq hold ios-sim                          newest iOS, model from config.toml
+  aq hold ios-sim@26.2 ios-sim@26.2        two iOS 26.2 simulators
+  aq hold \"ios-sim@26.2:iPhone 16 Pro\" android-emu@35:pixel_7 --account zhang0003";
+
 #[derive(Parser, Debug)]
 #[command(
     name = "aq",
@@ -46,11 +52,17 @@ pub enum Cmd {
         #[arg(long)]
         human: bool,
     },
-    /// Borrow a set of devices and accounts: aq hold <device type>... [--account <name>]...
+    /// Borrow a set of devices and accounts: aq hold <device>[@<version>][:<model>]... [--account <name>]...
+    #[command(after_help = HOLD_EXAMPLES)]
     Hold {
+        /// One per device: ios-sim, android-emu, ios-device, android-device, browser, desktop.
+        /// Simulators take [@<version>][:<model>]: ios-sim@26.2, "ios-sim@26.2:iPhone 16 Pro", android-emu@35:pixel_7.
+        /// Without them: the newest iOS / the [android-emu] avd, and the model from config.toml
         devices: Vec<String>,
+        /// Test account to borrow with the devices; repeat for more
         #[arg(long = "account")]
         accounts: Vec<String>,
+        /// Wait at most this many seconds (default 100; 0 submits without waiting)
         #[arg(long)]
         wait: Option<u64>,
         #[arg(long)]

@@ -1,10 +1,14 @@
 #!/bin/bash
-# 验收用假 Android emulator。状态目录 $FAKE_EMU_DIR：running/<端口> 内容为本进程 pid；fail_boot 存在时直接退出（注入启动失败）。
+# 验收用假 Android emulator。状态目录 $FAKE_EMU_DIR：running/<端口> 内容为本进程 pid；fail_boot 存在时直接退出（注入启动失败）；
+# AVD 不在 $ANDROID_AVD_HOME 里时报错退出；启动的 AVD 的 config.ini 复制到 config.last。
 D="${FAKE_EMU_DIR:?FAKE_EMU_DIR 未设置}"; mkdir -p "$D/running"
 echo "$*" >> "$D/calls.log"
 port=""; avd=""
 while [ $# -gt 0 ]; do case "$1" in -port) port="$2"; shift ;; -avd) avd="$2"; shift ;; esac; shift; done
 [ -e "$D/fail_boot" ] && { echo "fake emulator: boot failed" >&2; exit 1; }
+# 像真的一样只认 $ANDROID_AVD_HOME 里有的 AVD
+[ -f "${ANDROID_AVD_HOME:-/nonexistent}/$avd.ini" ] || { echo "ERROR | Unknown AVD name [$avd]" >&2; exit 1; }
+cp "$ANDROID_AVD_HOME/$avd.avd/config.ini" "$D/config.last" 2>/dev/null
 echo "$avd" > "$D/avd.last"
 ps -o nice= -p $$ | tr -d ' ' > "$D/nice.last"
 echo $$ > "$D/running/$port"

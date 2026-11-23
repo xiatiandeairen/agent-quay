@@ -66,7 +66,7 @@ pub fn locks_contract<L: Locks>(l: &L) {
 }
 
 pub fn sim_contract(s: &dyn Simulator) {
-    let udid = s.create("aq-hd_contract-1").unwrap();
+    let udid = s.create("aq-hd_contract-1", &Default::default()).unwrap();
     assert!(s.list_aq().unwrap().contains(&("aq-hd_contract-1".to_string(), udid.clone())));
     s.delete(&udid).unwrap();
     assert!(!s.list_aq().unwrap().iter().any(|(_, u)| *u == udid));
@@ -115,7 +115,33 @@ fn simulator_real_xcrun() {
     sim_contract(&aq_sys::sim::SimCtl { cmd: vec!["xcrun".into(), "simctl".into()], model: "iPhone 17 Pro".into() });
 }
 
-/// 真 Android 模拟器：按 AQ_TEST_AVD（默认 aq_lowend26）起一个 read-only 实例再关掉（需要 Android SDK）。
+/// avdmanager list device：假脚本和真工具的输出按同一种格式解析，都能认出名字带空格的机型和手表专用机型。
+fn profiles_contract(text: &str) {
+    let p = aq_sys::avd::parse_profiles(text);
+    assert!(p.iter().any(|x| x.id == "pixel_6" && x.kind == "phone"), "{p:?}");
+    assert!(p.iter().any(|x| x.id == "Nexus 5X" && x.kind == "phone"), "{p:?}");
+    assert!(p.iter().any(|x| x.id.starts_with("wearos") && x.kind == "wear"), "{p:?}");
+}
+
+#[test]
+fn avdmanager_profiles_fake() {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/support/fake-avdmanager");
+    let dir = tempfile::tempdir().unwrap();
+    let out = std::process::Command::new(script).args(["list", "device"]).env("FAKE_EMU_DIR", dir.path()).output().unwrap();
+    profiles_contract(&String::from_utf8_lossy(&out.stdout));
+}
+
+/// 真 avdmanager（需要 Android SDK 的 cmdline-tools）。
+#[test]
+#[ignore]
+fn avdmanager_profiles_real() {
+    let home = std::env::var("HOME").unwrap();
+    let tool = format!("{home}/Library/Android/sdk/cmdline-tools/latest/bin/avdmanager");
+    let out = std::process::Command::new(tool).args(["list", "device"]).output().unwrap();
+    profiles_contract(&String::from_utf8_lossy(&out.stdout));
+}
+
+/// 真 Android 模拟器：用 AQ_TEST_AVD（默认 aq_lowend26）的镜像、机型新建一个 AVD，起 read-only 实例再关掉并删掉 AVD（需要 Android SDK）。
 #[test]
 #[ignore]
 fn simulator_real_android_emulator() {

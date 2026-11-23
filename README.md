@@ -93,7 +93,7 @@ For other agents, point them at [`skills/aq/SKILL.md`](skills/aq/SKILL.md), for 
 ### Requirements
 
 - macOS (tested on Apple Silicon)
-- Xcode for `ios-sim`; Android SDK emulator for `android-emu` (optional)
+- Xcode for `ios-sim`; Android SDK emulator and cmdline-tools (`avdmanager`) for `android-emu` (optional)
 - `agent-browser` / `agent-desktop` only if you lend `browser` / `desktop` sessions
 
 ### Homebrew
@@ -138,7 +138,7 @@ aq status --human                   # everything on this machine, readable
 aq status --top                     # live dashboard, like htop (Ctrl-C to quit)
 ```
 
-Device types for `hold`: `ios-sim`, `android-emu`, `ios-device`, `android-device`, `browser`, `desktop`. Repeat a type to borrow several; the whole set is lent at once or queued as one.
+Device types for `hold`: `ios-sim`, `android-emu`, `ios-device`, `android-device`, `browser`, `desktop`. Repeat a type to borrow several; the whole set is lent at once or queued as one. Simulators can pin a system version and model: `ios-sim@26.2`, `"ios-sim@26.2:iPhone 16 Pro"`, `android-emu@35:pixel_7`. If this Mac cannot make that combination (runtime or system image not installed, model not supported), the hold is rejected at once with what is installed and how to install the missing one; aq never installs anything itself.
 
 ### Output
 
@@ -193,7 +193,10 @@ nice = 10                # CPU priority of everything aq starts (0-20, 0 = off)
 ai_cli = "auto"          # or a fixed command, e.g. "claude -p"
 
 [ios-sim]
-model = "iPhone 17 Pro"
+model = "iPhone 17 Pro"   # default model; a hold can ask for another with ios-sim:<model>
+
+[android-emu]
+avd = "Pixel_8_API_35"   # default image, model and RAM for the AVD aq creates for each hold
 
 [ios-device]
 ids = ["00008150-…"]     # only devices listed here are ever lent
@@ -225,7 +228,7 @@ aq only runs what an agent asks it to:
 
 - `aq run`: the given command, in its own process session, once there is room for it.
 - Code fingerprint: read-only `git` commands (`rev-parse`, `diff HEAD`, `ls-files`, `submodule status`) in the working directory, so identical runs can be shared.
-- `aq hold`: `xcrun simctl` to create, boot and delete simulators; the Android SDK `emulator` and `adb` for emulators; read-only `xcrun devicectl list devices` and `adb devices -l` to find real devices; `agent-browser` to open and close browser sessions. A `desktop` hold only hands out a session name.
+- `aq hold`: `xcrun simctl` to create, boot and delete simulators; the Android SDK `avdmanager`, `emulator` and `adb` to create, run and delete one AVD per emulator hold (kept under aq's state directory); read-only `xcrun devicectl list devices` and `adb devices -l` to find real devices; `agent-browser` to open and close browser sessions. A `desktop` hold only hands out a session name.
 - First run of a new command: the calling agent's CLI, for an estimate (see [Privacy](#privacy)).
 
 ## Privacy

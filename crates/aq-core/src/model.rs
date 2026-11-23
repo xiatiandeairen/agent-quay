@@ -142,8 +142,8 @@ pub struct Resources {
     pub uses_net: bool,
 }
 
-/// `holds.request` 的内容：`{"devices":[...],"accounts":[...],"exclude":[...]}`。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// `holds.request` 的内容：`{"devices":[...],"accounts":[...],"exclude":[...],"specs":[...]}`。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HoldRequest {
     pub devices: Vec<DeviceType>,
@@ -151,6 +151,16 @@ pub struct HoldRequest {
     /// 提交时声明了但不可用的真机 id，分配时跳过（见 devices.rs）。为空时不写进 JSON。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude: Vec<String>,
+    /// 每台设备指定的版本和机型，与 devices 一一对应；全是默认时为空、不写进 JSON（升级前的记录也没有它，CASE-HOLD-17）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub specs: Vec<crate::devspec::DeviceSpec>,
+}
+
+impl HoldRequest {
+    /// 第 i 台设备的版本和机型；没写的是默认。
+    pub fn spec(&self, i: usize) -> crate::devspec::DeviceSpec {
+        self.specs.get(i).cloned().unwrap_or_default()
+    }
 }
 
 /// 进程身份：进程号 + 启动时间（Unix 毫秒），避免进程号复用后误判。

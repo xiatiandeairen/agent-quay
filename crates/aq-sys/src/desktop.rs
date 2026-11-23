@@ -3,12 +3,13 @@
 //! agent-desktop 的 --session 只是快照引用的命名空间，不起进程，所以借时只发名字、还时无事可做；
 //! 也没有可列出的实体，不参与按名字对账，不走 Simulator 契约（契约要求建完能列出来）。
 
+use aq_core::devspec::DeviceSpec;
 use aq_core::ports::Simulator;
 
 pub struct AgentDesktop;
 
 impl Simulator for AgentDesktop {
-    fn create(&self, name: &str) -> Result<String, String> {
+    fn create(&self, name: &str, _spec: &DeviceSpec) -> Result<String, String> {
         Ok(name.to_string())
     }
 

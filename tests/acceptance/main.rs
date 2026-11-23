@@ -17,5 +17,6 @@ mod realworld;
 mod reclass;
 mod reuse;
 mod run;
+mod spec;
 mod status;
 mod support;

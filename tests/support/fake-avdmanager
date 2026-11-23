@@ -1,0 +1,20 @@
+#!/bin/bash
+# 验收用假 avdmanager。create avd 在 $ANDROID_AVD_HOME 建 <名字>.avd/config.ini 和 <名字>.ini（内存先按机型默认给 1536M，像真的一样）；
+# list device 输出固定的几个机型配置（含名字带空格的、手表专用的）。$FAKE_EMU_DIR/fail_avd 存在时注入创建失败；调用记在 avdmanager.log。
+D="${FAKE_EMU_DIR:?FAKE_EMU_DIR 未设置}"
+echo "$*" >> "$D/avdmanager.log"
+case "$1 $2" in
+  "list device")
+    for id in pixel_6 pixel_7 pixel_tablet "Nexus 5X"; do printf 'id: 1 or "%s"\n    Name: %s\n---------\n' "$id" "$id"; done
+    printf 'id: 43 or "wearos_rect"\n    Name: Wear OS Rectangular\n    Tag : android-wear\n' ;;
+  "create avd")
+    shift 2; name=""; pkg=""; dev=""
+    while [ $# -gt 0 ]; do case "$1" in -n) name="$2"; shift ;; -k) pkg="$2"; shift ;; -d) dev="$2"; shift ;; esac; shift; done
+    cat >/dev/null  # 答「要不要自定义硬件配置」
+    [ -e "$D/fail_avd" ] && { echo "Error: fake avdmanager failed" >&2; exit 1; }
+    H="${ANDROID_AVD_HOME:?ANDROID_AVD_HOME 未设置}"; mkdir -p "$H/$name.avd"
+    sysdir="$(echo "$pkg" | tr ';' '/')/"
+    printf 'image.sysdir.1=%s\nhw.device.name=%s\nhw.ramSize=1536M\n' "$sysdir" "$dev" > "$H/$name.avd/config.ini"
+    printf 'path=%s\n' "$H/$name.avd" > "$H/$name.ini" ;;
+  *) echo "fake-avdmanager: unknown $*" >&2; exit 2 ;;
+esac

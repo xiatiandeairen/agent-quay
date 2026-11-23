@@ -6,8 +6,9 @@ use std::time::{Duration, Instant};
 
 use aq_core::admit::{unschedulable, Demand};
 use aq_core::devices::{judge, real_types, Verdict};
+use aq_core::devspec::{parse_device, DeviceSpec};
 use aq_core::model::{DeviceType, HoldRequest, HoldStatus, ProcId, Reason};
-use aq_core::ports::RealDevices;
+use aq_core::ports::{RealDevices, SpecError};
 use aq_store::{HoldRow, NewHold, Store};
 use aq_sys::lock::inheritable;
 use serde_json::Value;
@@ -32,10 +33,14 @@ fn parse(a: &HoldArgs) -> AppResult<HoldRequest> {
         ));
     }
     let mut devices = vec![];
+    let mut specs = vec![];
     for d in &a.devices {
-        devices.push(DeviceType::parse(d).ok_or_else(|| {
-            AppError::Usage(format!("unknown device type: {d} (one of ios-sim, android-emu, ios-device, android-device, browser, desktop)"))
-        })?);
+        let (t, spec) = parse_device(d).map_err(AppError::Usage)?;
+        devices.push(t);
+        specs.push(spec);
+    }
+    if specs.iter().all(DeviceSpec::is_default) {
+        specs.clear(); // 全是默认时不记，记录与以前一样
     }
     let mut seen = HashSet::new();
     for acc in &a.accounts {
@@ -43,7 +48,26 @@ fn parse(a: &HoldArgs) -> AppResult<HoldRequest> {
             return Err(AppError::Usage(format!("account repeated or empty: {acc:?}")));
         }
     }
-    Ok(HoldRequest { devices, accounts: a.accounts.clone(), exclude: vec![] })
+    Ok(HoldRequest { devices, accounts: a.accounts.clone(), exclude: vec![], specs })
+}
+
+/// 提交时核对每台模拟器的版本、机型能不能组合出来；同样的写法只查一次（CASE-HOLD-14）。
+/// 组合不了：rejected unschedulable，不进账本；查不了（工具出错）：只给 message 的环境错误。
+fn check_specs(ctx: &Ctx, req: &HoldRequest) -> AppResult<Option<String>> {
+    let mut seen = HashSet::new();
+    for (i, t) in req.devices.iter().enumerate() {
+        let spec = req.spec(i);
+        if !seen.insert((*t, spec.clone())) {
+            continue;
+        }
+        let Some(backend) = ctx.virtual_backend(*t) else { continue };
+        match backend.check(&spec) {
+            Ok(()) => {}
+            Err(SpecError::Unfit(m)) => return Ok(Some(m)),
+            Err(SpecError::Tool(m)) => return Err(AppError::Fatal(m)),
+        }
+    }
+    Ok(None)
 }
 
 /// 借用者：已验证 agent 的会话主进程。认不出记为未识别（进程号 0），只按闲置收回（CASE-RECLAIM-5、CASE-RECLAIM-5）；
@@ -69,6 +93,10 @@ fn check_real(req: &HoldRequest, ctx: &Ctx) -> Verdict {
 
 pub fn hold(ctx: &Ctx, store: &mut Store, a: &HoldArgs) -> AppResult<(Value, i32)> {
     let mut req = parse(a)?;
+    if let Some(why) = check_specs(ctx, &req)? {
+        let r = Reason::Unschedulable;
+        return Ok((view::rejected(r.as_str(), &why), r.exit_code()));
+    }
     let v = check_real(&req, ctx);
     if let Some((reason, msg)) = &v.reject {
         return Ok((view::rejected_devices(reason.as_str(), msg, &v), reason.exit_code()));
@@ -158,12 +186,12 @@ fn allocate(ctx: &Ctx, store: &mut Store, h: &HoldRow) -> AppResult<Option<Picke
 /// 已建好的虚拟设备：(序号, 类型, 设备 id)。
 type Made = Vec<(i64, DeviceType, String)>;
 
-fn create_sims(ctx: &Ctx, id: &str, devs: &[(DeviceType, Option<String>)]) -> Result<Made, (Made, String)> {
+fn create_sims(ctx: &Ctx, h: &HoldRow, devs: &[(DeviceType, Option<String>)]) -> Result<Made, (Made, String)> {
     let mut made = vec![];
     for (i, (t, _)) in devs.iter().enumerate() {
         let seq = i as i64 + 1;
         let Some(backend) = ctx.virtual_backend(*t) else { continue };
-        match backend.create(&ctx.device_name(id, seq)) {
+        match backend.create(&ctx.device_name(&h.id, seq), &h.request.spec(i)) {
             Ok(dev) => made.push((seq, *t, dev)),
             Err(e) => return Err((made, e)),
         }
@@ -187,7 +215,7 @@ pub fn runner(ctx: &Ctx, store: &mut Store, id: &str, _lock: File) -> AppResult<
     }
     cleanup_half_made(ctx, store, &h)?;
     let Some(devs) = allocate(ctx, store, &h)? else { return Ok(()) };
-    let made = match create_sims(ctx, id, &devs) {
+    let made = match create_sims(ctx, &h, &devs) {
         Ok(m) => m,
         Err((made, e)) => {
             discard(ctx, &made);

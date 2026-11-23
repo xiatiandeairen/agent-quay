@@ -13,7 +13,9 @@ pub struct Config {
     pub cap: Capacity,
     /// "auto" 或具体命令（如 "claude -p"）。
     pub ai_cli: String,
+    /// 借 ios-sim 不写 `:<机型>` 时用的机型。
     pub ios_sim_model: String,
+    /// 借 android-emu 时默认的镜像、机型、内存从这个 AVD 读；aq 每次新建自己的 AVD，不启动它（CASE-HOLD-16）。
     pub android_avd: String,
     /// aq 启动的命令、Android 模拟器、浏览器会话的 nice 值：0～20，默认 10，0 不降（CASE-PROT-1～3）。
     pub nice: i32,

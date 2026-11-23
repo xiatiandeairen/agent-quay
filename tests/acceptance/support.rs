@@ -92,10 +92,41 @@ impl Env {
         for d in ["cfg/aq", "st", "sim", "emu/running", "browser/sessions", "ai", "work", "dev"] {
             std::fs::create_dir_all(e.path(d)).expect("mkdir");
         }
+        e.fake_android_sdk();
         let ai = support_dir().join("fake-ai");
         e.write_config(&format!("ai_cli = \"{}\"\n{cfg}", ai.display()));
         e.set_sys(30_000, 500_000);
         e
+    }
+
+    /// 假 Android SDK（HOME 下的默认位置）：arm64 的 35、37.0，只有 x86_64 的 36；配置 AVD test_avd 用 35、pixel_6、4096M。
+    fn fake_android_sdk(&self) {
+        for d in [
+            "Library/Android/sdk/system-images/android-35/google_apis/arm64-v8a",
+            "Library/Android/sdk/system-images/android-36/google_apis_playstore/x86_64",
+            "Library/Android/sdk/system-images/android-37.0/google_apis_playstore_ps16k/arm64-v8a",
+            ".android/avd/test_avd.avd",
+        ] {
+            std::fs::create_dir_all(self.path(d)).expect("mkdir");
+        }
+        let cfg = "image.sysdir.1 = system-images/android-35/google_apis/arm64-v8a/\nhw.device.name = pixel_6\nhw.ramSize = 4096M\n";
+        std::fs::write(self.path(".android/avd/test_avd.avd/config.ini"), cfg).expect("avd");
+        std::fs::write(self.path(".android/avd/test_avd.ini"), format!("path={}\n", self.path(".android/avd/test_avd.avd").display()))
+            .expect("avd");
+    }
+
+    /// aq 给 android-emu 新建的 AVD 目录（在状态目录下）。
+    pub fn aq_avds(&self) -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(self.state().join("emu/avd"))
+            .map(|rd| rd.flatten().filter_map(|e| e.file_name().to_string_lossy().strip_suffix(".avd").map(String::from)).collect())
+            .unwrap_or_default();
+        v.sort();
+        v
+    }
+
+    /// aq 新建的某个 AVD 的 config.ini。
+    pub fn aq_avd_config(&self, name: &str) -> String {
+        std::fs::read_to_string(self.state().join(format!("emu/avd/{name}.avd/config.ini"))).unwrap_or_default()
     }
 
     pub fn path(&self, rel: &str) -> PathBuf {
@@ -196,6 +227,7 @@ impl Env {
             .env("FAKE_SIM_DIR", self.path("sim"))
             .env("AQ_EMULATOR", support_dir().join("fake-emulator"))
             .env("AQ_ADB", support_dir().join("fake-adb"))
+            .env("AQ_AVDMANAGER", support_dir().join("fake-avdmanager"))
             .env("FAKE_EMU_DIR", self.path("emu"))
             .env("AQ_DEVICECTL", support_dir().join("fake-devicectl"))
             .env("FAKE_DEV_DIR", self.path("dev"))

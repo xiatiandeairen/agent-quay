@@ -5,6 +5,7 @@
 
 use std::time::Duration;
 
+use aq_core::devspec::DeviceSpec;
 use aq_core::ports::Simulator;
 use serde::Deserialize;
 
@@ -48,7 +49,7 @@ impl AgentBrowser {
 }
 
 impl Simulator for AgentBrowser {
-    fn create(&self, name: &str) -> Result<String, String> {
+    fn create(&self, name: &str, _spec: &DeviceSpec) -> Result<String, String> {
         if let Err(e) = self.call(&["--session", name, "open", "about:blank"], 120) {
             let _ = self.call(&["--session", name, "close"], 30); // 起了一半的 Chrome 一并关掉；关不掉由对账兜底
             return Err(format!("agent-browser could not open session {name}: {e}"));

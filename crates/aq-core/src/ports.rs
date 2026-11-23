@@ -2,6 +2,7 @@
 
 use crate::admit::SysSample;
 use crate::devices::Seen;
+use crate::devspec::DeviceSpec;
 use crate::model::{DeviceType, ProcId};
 
 /// 时钟：真实时间（写 *_at）和不含睡眠的单调时间（判断超时，见「三处补充约定」）。
@@ -53,9 +54,22 @@ pub trait SysRes {
     fn cpu_pct(&self) -> i64;
 }
 
-/// 模拟器：按名字新建并启动、关机删除、列出 aq- 开头的（含别的账本的，归属由 devname 判）。
+/// 提交时核对版本和机型的结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpecError {
+    /// 本机组合不出来（没装这个版本、版本不支持这个机型等），等也等不到；文字给调用方看。
+    Unfit(String),
+    /// 查不了（工具缺失、超时、输出看不懂）。
+    Tool(String),
+}
+
+/// 模拟器：按名字和版本、机型新建并启动、关机删除、列出 aq- 开头的（含别的账本的，归属由 devname 判）。
 pub trait Simulator {
-    fn create(&self, name: &str) -> Result<String, String>;
+    /// 提交时核对这台能不能建：只查不建。默认都能建（浏览器、桌面会话没有版本和机型）。
+    fn check(&self, _spec: &DeviceSpec) -> Result<(), SpecError> {
+        Ok(())
+    }
+    fn create(&self, name: &str, spec: &DeviceSpec) -> Result<String, String>;
     fn delete(&self, udid: &str) -> Result<(), String>;
     fn list_aq(&self) -> Result<Vec<(String, String)>, String>;
 }

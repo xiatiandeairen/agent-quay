@@ -140,6 +140,8 @@ aq 按需使用：只调度经它提交的任务，不拦截其他命令。
 实现：`aq_core::usage`、`aq_core::check`、`crates/aq-sys/src/procs.rs`。
 
 - **已连接但没登记的真机绝不借出**：可能是用户自用的手机（1.2）。
+- **模拟器的版本、机型只组合不挑**（CASE-HOLD-13～19）：`ios-sim@26.2:iPhone 16 Pro`、`android-emu@35:pixel_7`，不写的取默认（iOS 最新运行时和配置机型；Android 配置 AVD 的镜像和机型）。组合不了（没装、版本不支持机型、只有跑不了的 x86_64 镜像）就在提交时拒绝（unschedulable），说清缺什么、本机有什么、怎么装，不替调用方换版本或机型；aq 不安装镜像（1.2「项目的构建环境」）。起因：Xcode 27.2 下 R100 的老 App 在 iOS 27 模拟器上启动即崩，必须用 26.2，而 aq 只会建最新的，agent 只好自己 `simctl create`（2026-11-19 会话）。核对放在提交时，是因为放到创建时失败会报 device_error，而它的处理是「重新借」，agent 会反复重试。
+- **Android 每次新建 AVD**（CASE-HOLD-16、CASE-RECLAIM-13）：和 iOS 一样「借时建、还时删」，AVD 放在 aq 状态目录（不进 `~/.android/avd`，Android Studio 里看不到）；配置 AVD 只提供默认值、不被启动。内存（`hw.ramSize`）照抄配置 AVD，否则 avdmanager 按机型给默认值（pixel_6 是 1536M），记账就对不上。本机实测（2026-11-23）：建一个 AVD 约 0.65 秒，新建的 AVD 带 `-read-only` 能正常启动（API 35 约 20 秒）；但 API 37.0 的 16K 页镜像在 emulator 36.5.11 上起不来（qemu mprotect 报错），这类镜像与工具的兼容问题不归 aq，会在启动超时后报 device_error。
 - **在用判定看进程，不靠使用方更新文件**（CASE-RECLAIM-10～12）：原设计写「使用设备的工具每次操作时更新 `.used`」，但 agent-device、xcodebuild 都不知道这个文件，实际没人更新，在用的设备到阈值也会被收回；反过来借了不用的设备要等 2 小时。改成 aq 自己看进程：agent-device 的 iOS runner（xcodebuild `test-without-building … -destination platform=iOS Simulator,id=<UDID>`）在会话期间一直活着，参数里带 UDID；Android 上会话期间一直有 `adb -s <serial> shell am instrument …`（本机 2026-11-19 实测，agent-device 0.21.39）。代价：
   - 一直开着、没人操作的会话一直算在用，由借出上限兜住。agent-device close 之后 iOS runner 默认还留 5 分钟（`AGENT_DEVICE_IOS_RUNNER_IDLE_STOP_MS`，0.21.39），这段时间也算在用（2026-11-19 实机）。
   - 两次检查之间就结束的进程看不到：不开 agent-device 会话、直接用一条条 adb 命令操作 Android 时，会按闲置收回。
@@ -200,6 +202,7 @@ aq 按需使用：只调度经它提交的任务，不拦截其他命令。
 | 只支持一台 Mac | 不做多机调度 | — |
 | 外层没登记的嵌套 git 仓（不是子模块） | 在外层 git 里只是一个未跟踪的目录名，里面的改动和提交不进指纹：可能合并到改动前那次执行的结果，运行中改了也不标 `content_changed` | 项目把它登记成子模块；或提交时加 `--fresh` |
 | 同一仓库不同子目录的同一条命令共用估算历史（如 monorepo 各包都用 `just test`） | 轻的按重的记账、多排队，结果不受影响；本机账本里只有 1 类命令、6 次执行碰到（2026-11-20） | — |
+| 换回旧版 aq 时读不了新版写下的、带版本或机型的借用（`specs` 字段） | 只在降级且正有这样的 waiting、held 借用时碰到 | 先 release 这些借用再降级 |
 
 ### 5.2 后续
 

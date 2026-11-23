@@ -93,7 +93,7 @@ brew install xiatiandeairen/tap/aq
 ### 环境要求
 
 - macOS（在 Apple Silicon 上测试过）
-- 借 `ios-sim` 需要 Xcode；借 `android-emu` 需要 Android SDK 模拟器（可选）
+- 借 `ios-sim` 需要 Xcode；借 `android-emu` 需要 Android SDK 模拟器和 cmdline-tools（`avdmanager`）（可选）
 - 借 `browser` / `desktop` 时才需要 `agent-browser` / `agent-desktop`
 
 ### Homebrew
@@ -138,7 +138,7 @@ aq status --human                   # 全机情况，给人看
 aq status --top                     # 实时仪表盘，类似 htop（Ctrl-C 退出）
 ```
 
-`hold` 的设备类型：`ios-sim`、`android-emu`、`ios-device`、`android-device`、`browser`、`desktop`。要几台就把类型写几次；整组一次借到，或整组排队。
+`hold` 的设备类型：`ios-sim`、`android-emu`、`ios-device`、`android-device`、`browser`、`desktop`。要几台就把类型写几次；整组一次借到，或整组排队。模拟器可以指定系统版本和机型：`ios-sim@26.2`、`"ios-sim@26.2:iPhone 16 Pro"`、`android-emu@35:pixel_7`。本机组合不出来（没装这个运行时或系统镜像、版本不支持该机型）时立即拒绝，并说明本机装了什么、缺的怎么装；aq 自己不安装任何东西。
 
 ### 输出
 
@@ -193,7 +193,10 @@ nice = 10                # aq 启动的进程的 CPU 优先级（0～20，0 不�
 ai_cli = "auto"          # 或写死一条命令，如 "claude -p"
 
 [ios-sim]
-model = "iPhone 17 Pro"
+model = "iPhone 17 Pro"   # 默认机型；单次借用可以用 ios-sim:<机型> 换别的
+
+[android-emu]
+avd = "Pixel_8_API_35"   # aq 每次借用新建的 AVD 默认用它的镜像、机型和内存
 
 [ios-device]
 ids = ["00008150-…"]     # 只借这里登记的真机
@@ -225,7 +228,7 @@ aq 只运行 agent 让它运行的东西：
 
 - `aq run`：轮到时在独立的进程会话里运行给定的命令。
 - 代码指纹：在执行目录运行只读的 `git` 命令（`rev-parse`、`diff HEAD`、`ls-files`、`submodule status`），用来判断能不能共用同一次执行。
-- `aq hold`：用 `xcrun simctl` 新建、启动、删除模拟器；用 Android SDK 的 `emulator` 和 `adb` 管理安卓模拟器；用只读的 `xcrun devicectl list devices` 和 `adb devices -l` 查找真机；用 `agent-browser` 开关浏览器会话。借 `desktop` 只发一个会话名。
+- `aq hold`：用 `xcrun simctl` 新建、启动、删除模拟器；用 Android SDK 的 `avdmanager`、`emulator` 和 `adb` 为每次借用新建、启动、删除一个 AVD（放在 aq 的状态目录里）；用只读的 `xcrun devicectl list devices` 和 `adb devices -l` 查找真机；用 `agent-browser` 开关浏览器会话。借 `desktop` 只发一个会话名。
 - 第一次遇到某条命令：调用 agent 自己的 CLI 估算资源（见[隐私](#隐私)）。
 
 ## 隐私

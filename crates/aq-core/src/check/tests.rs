@@ -19,7 +19,7 @@ fn hold(id: &str, status: HoldStatus, devices: Vec<DeviceType>) -> HoldView {
         status,
         requested_at: 1,
         acquired_at: Some(1),
-        request: HoldRequest { devices, accounts: vec!["a".into()], exclude: vec![] },
+        request: HoldRequest { devices, accounts: vec!["a".into()], exclude: vec![], specs: vec![] },
         owner: ProcId { pid: 1, started_at: 1 },
     }
 }

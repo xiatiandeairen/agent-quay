@@ -11,7 +11,7 @@ fn ex(id: &str, heavy: bool, mem: i64) -> Item {
 }
 fn hold(id: &str, devices: Vec<DeviceType>, accounts: &[&str]) -> Item {
     let accounts = accounts.iter().map(|s| s.to_string()).collect();
-    Item { id: id.into(), demand: Demand::Hold(HoldRequest { devices, accounts, exclude: vec![] }) }
+    Item { id: id.into(), demand: Demand::Hold(HoldRequest { devices, accounts, exclude: vec![], specs: vec![] }) }
 }
 fn ids(r: &AdmitResult) -> Vec<&str> {
     r.admitted.iter().map(|a| a.id.as_str()).collect()
@@ -107,14 +107,14 @@ fn sims_by_memory() {
     let items = vec![hold("h1", vec![DeviceType::IosSim], &[]), hold("h2", vec![DeviceType::IosSim], &[])];
     let r = admit(&items, Ledger::default(), &c, &sys());
     assert_eq!(ids(&r), vec!["h1"]);
-    let big = Demand::Hold(HoldRequest { devices: vec![DeviceType::IosSim; 2], accounts: vec![], exclude: vec![] });
+    let big = Demand::Hold(HoldRequest { devices: vec![DeviceType::IosSim; 2], accounts: vec![], exclude: vec![], specs: vec![] });
     assert!(unschedulable(&big, &c).is_some());
 }
 
 // CASE-HOLD-6
 #[test]
 fn more_phones_than_list() {
-    let d = Demand::Hold(HoldRequest { devices: vec![DeviceType::IosDevice; 2], accounts: vec![], exclude: vec![] });
+    let d = Demand::Hold(HoldRequest { devices: vec![DeviceType::IosDevice; 2], accounts: vec![], exclude: vec![], specs: vec![] });
     assert!(unschedulable(&d, &cap()).is_some());
 }
 

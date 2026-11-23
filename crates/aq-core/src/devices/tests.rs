@@ -51,7 +51,7 @@ fn adb_states_and_emulators() {
 }
 
 fn req(devices: Vec<DeviceType>) -> HoldRequest {
-    HoldRequest { devices, accounts: vec![], exclude: vec![] }
+    HoldRequest { devices, accounts: vec![], exclude: vec![], specs: vec![] }
 }
 
 fn cap(ios: &[&str]) -> Capacity {

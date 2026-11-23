@@ -6,6 +6,7 @@ pub mod check;
 pub mod cpu_watch;
 pub mod devices;
 pub mod devname;
+pub mod devspec;
 pub mod estimate;
 pub mod model;
 pub mod ports;
