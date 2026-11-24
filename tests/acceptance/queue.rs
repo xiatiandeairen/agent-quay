@@ -103,6 +103,9 @@ fn head_build_waiting_for_memory_blocks_later_sim() {
     let a = e.aq(&["run", "--fresh", "--wait", "0", "--", "fake-task", "--secs", "3"]);
     assert!(until(10, || running(&e) == 1));
     let b = e.aq(&["run", "--fresh", "--wait", "0", "--", "fake-task", "--secs", "1"]);
+    // 没评估完的执行还不在排队顺位里，等 b 评估完再借，否则机器忙时借用会赶在 b 前面
+    let evaluated = format!("SELECT count(*) FROM executions WHERE id = '{}' AND heavy IS NOT NULL", b.id());
+    assert!(until(10, || e.q_i64(&evaluated) == 1));
     let h = e.aq(&["hold", "ios-sim", "--wait", "1"]);
     assert_eq!(h.status(), "waiting", "排头缺内存，后来的模拟器不能占走");
     let s = e.aq(&["status", &a.id(), &b.id(), "--wait", "30"]);
