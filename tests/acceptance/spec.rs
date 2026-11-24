@@ -80,15 +80,37 @@ fn unfit_ios_combinations_are_rejected_at_submit() {
     );
     let m = rejected(&e, &["hold", "ios-sim@26"]);
     assert!(m.contains("Write the full version, e.g. ios-sim@26.2") && !m.contains("xcodebuild"), "{m}");
-    let m = rejected(&e, &["hold", "ios-sim@26.2:iPhone 18 Pro"]);
-    assert!(m.contains("iOS 26.2 does not support iPhone 18 Pro; it supports: iPhone 17 Pro. E.g. ios-sim@26.2:iPhone 17 Pro"), "{m}");
     let m = rejected(&e, &["hold", "ios-sim@26.2", "android-emu@34"]);
     assert!(m.contains("no arm64 Android API 34"), "一组里有一项不行就整组拒绝：{m}");
     assert!(created(&e).is_empty() && e.aq_avds().is_empty(), "不建任何设备");
     assert_eq!(e.q_i64("SELECT count(*) FROM holds"), 0);
+}
+
+// CASE-HOLD-14
+#[test]
+fn ios_model_misses_say_whether_the_name_or_the_version_is_wrong() {
+    let e = Env::new();
+    for (arg, want) in [
+        ("ios-sim@26.2:iPhone 19 Pro", "no iOS simulator model named iPhone 19 Pro; e.g. iPhone 18 Pro, iPhone 17 Pro, iPhone 17 Pro Max; full list: xcrun simctl list devicetypes"),
+        ("ios-sim:iphone 17 pro", "no iOS simulator model named iphone 17 pro; did you mean iPhone 17 Pro?"),
+        ("ios-sim@26.2:iPhone 18 Pro", "iPhone 18 Pro needs iOS 27.0 or newer, so iOS 26.2 cannot run it; e.g. iPhone 17 Pro, iPhone 17 Pro Max, iPhone Air; full list: xcrun simctl list runtimes -j \"iOS 26.2\""),
+        ("ios-sim@27.2:iPhone 8", "iPhone 8 runs only up to iOS 16.4, so iOS 27.2 cannot run it"),
+        ("ios-sim:iPhone 8", "iPhone 8 runs only on iOS 11.0 to 16.4; installed: 26.2, 27.2. To install: xcodebuild -downloadPlatform iOS -buildVersion 16.4"),
+    ] {
+        let m = rejected(&e, &["hold", arg]);
+        assert!(m.contains(want), "{arg}: {m}");
+    }
+    // 只装了 26.2 时要 iPhone 18 Pro：需要更新的系统
+    e.env("FAKE_SIM_ONLY", "26.2");
+    let m = rejected(&e, &["hold", "ios-sim:iPhone 18 Pro"]);
+    assert!(
+        m.contains("iPhone 18 Pro needs iOS 27.0 or newer; installed: 26.2. To install: xcodebuild -downloadPlatform iOS")
+            && !m.contains("-buildVersion"),
+        "{m}"
+    );
     e.write_config(&DEFAULT_CONFIG.replace("[ios-sim]\n", "[ios-sim]\nmodel = \"iPhone 18 Pro\"\n"));
     let m = rejected(&e, &["hold", "ios-sim@26.2"]);
-    assert!(m.contains("(the default model, [ios-sim] model in config.toml)"), "{m}");
+    assert!(m.contains("iPhone 18 Pro (the default model, [ios-sim] model in config.toml) needs iOS 27.0 or newer"), "{m}");
 }
 
 // CASE-HOLD-14
