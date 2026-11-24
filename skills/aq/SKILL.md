@@ -1,6 +1,6 @@
 ---
 name: aq
-description: aq 排队：在本机跑编译或测试（xcodebuild、swift build/test、cargo build/test、gradle）、借 iOS/Android 模拟器或真机、借 agent-browser 浏览器或 agent-desktop 桌面会话、借测试账号，或要等待、找回自己提交的任务和设备时使用。用 aq run 代替直接执行和 pgrep/sleep 轮询，用 aq hold/release 代替自己开模拟器和浏览器会话。
+description: 在这台 Mac 上编译或跑测试（xcodebuild、swift build/test、cargo build/test、gradle）时使用；要用、启动或新建 iOS/Android 模拟器（包括要特定系统版本或机型），要用真机、agent-browser 浏览器、agent-desktop 桌面会话或测试账号时使用；要等待或找回自己提交的任务、借到的设备时也用。
 ---
 
 # aq
